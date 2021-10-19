@@ -2,33 +2,68 @@ package com.mercadolibre.flowbacklogchecker.consolidation;
 
 
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import static org.springframework.data.domain.Sort.Order.asc;
-import static org.springframework.data.domain.Sort.by;
-import static org.springframework.data.relational.core.query.Criteria.where;
-import static org.springframework.data.relational.core.query.Query.query;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 
 /**
  * An {@link EventsSource} that pushes the events stored in the "incoming_events" table.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class StoredEventsSource implements EventsSource {
 
-	private final R2dbcEntityTemplate template;
+	private final JdbcTemplate template;
 
 	public void provideWhile(
 			final long startingEventSerialNumberExclusive,
 			final ContextPredicate whileCondition,
 			final Sink sink
 	) {
-		template.select(
-				query(where("id").greaterThan(startingEventSerialNumberExclusive))
-						.sort(by(asc("id"))),
-				EventRecord.class
-		).takeWhile(x -> whileCondition.test()).subscribe(sink::accept);
-	}
+		long lastProvidedSerial = 0L;
+		long pageStartingSerial;
+		try (Connection connection = template.getDataSource().getConnection()) {
+			do {
+				pageStartingSerial = lastProvidedSerial;
+				var ps = connection.prepareStatement("SELECT id, entity_id, entity_type, struct_version, new_state, old_state "
+						+ "FROM incoming_events "
+						+ "WHERE id > ? "
+						+ "ORDER BY id ASC "
+						+ "LIMIT 10000", ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY, ResultSet.CLOSE_CURSORS_AT_COMMIT);
+				ps.setLong(1, lastProvidedSerial);
+				var rs = ps.executeQuery();
+				while (whileCondition.test() && rs.next()) {
+					var er = EventRecord.fromResultSet(rs);
+					lastProvidedSerial = er.arrivalSerialNumber;
+					sink.accept(er);
+				}
+				log.info("The events whose arrival serial is between {} and {} where provided", pageStartingSerial, lastProvidedSerial);
 
+			} while (lastProvidedSerial > pageStartingSerial);
+		} catch (SQLException sqlException) {
+			sqlException.printStackTrace();
+		}
+
+
+		//////
+
+//		template.query(
+//				"SELECT id, entity_id, entity_type, struct_version, new_state, old_state "
+//						+ "FROM incoming_events "
+//						+ "WHERE id > ? "
+//						+ "ORDER BY id",
+//				ps -> ps.setLong(1, startingEventSerialNumberExclusive),
+//				rs -> {
+//					while (whileCondition.test() && rs.next()) {
+//						sink.accept(EventRecord.fromResultSet(rs));
+//					}
+//					return null;
+//				}
+//		);
+	}
 }

@@ -17,7 +17,7 @@ import java.io.IOException;
 
 @RequiredArgsConstructor
 @Component()
-@DependsOn({"connectionFactory"})
+@DependsOn({"mysqlDataSource"})
 public class Init {
 
 	private final static Logger log = LoggerFactory.getLogger(Init.class);
@@ -28,16 +28,20 @@ public class Init {
 
 	@PostConstruct
 	void init() {
+		log.info("Starting...");
+		Backlog backlog;
+		try {
+			backlog = new Backlog(partitionsCatalog, eventRecordParser, 1, null);
+			final long serialNumberOfLastEventOfLastPhoto = backlog.getLastEventArrivalSerialNumber();
+			storedEventsSource.provideWhile(
+					serialNumberOfLastEventOfLastPhoto,
+					() -> true,
+					eventConsolidator(backlog, serialNumberOfLastEventOfLastPhoto)
+			);
 
-		var backlog = new Backlog(partitionsCatalog, eventRecordParser, 1, null);
-		final long serialNumberOfLastEventOfLastPhoto = backlog.getLastEventArrivalSerialNumber();
-		storedEventsSource.provideWhile(
-				serialNumberOfLastEventOfLastPhoto,
-				() -> true,
-				eventConsolidator(backlog, serialNumberOfLastEventOfLastPhoto)
-		);
-
-
+		} finally {
+			log.info("Finishing...");
+		}
 	}
 
 	private EventsSource.Sink eventConsolidator(final Backlog backlog, final long serialNumberOfLastEventOfLastPhoto) {
