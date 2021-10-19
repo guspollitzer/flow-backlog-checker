@@ -4,6 +4,9 @@ package com.mercadolibre.flowbacklogchecker.consolidation;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
+
 /**
  * A transition event as received from the fury stream, tagged with a serial number that tells the order of arrival.
  */
@@ -25,4 +28,15 @@ public class EventRecord {
 	final String newStateRawJson;
 
 	final String oldStateRawJson;
+
+	public static EventRecord fromResultSet(final ResultSet rs) throws SQLException {
+		return new EventRecord(
+				rs.getLong("id"),
+				rs.getString("entity_id"),
+				rs.getString("entity_type"),
+				rs.getInt("struct_version"),
+				rs.getString("new_state"),
+				rs.getString("old_state")
+		);
+	}
 }

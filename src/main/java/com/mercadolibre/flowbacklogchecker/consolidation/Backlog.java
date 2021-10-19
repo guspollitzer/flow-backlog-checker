@@ -3,6 +3,7 @@ package com.mercadolibre.flowbacklogchecker.consolidation;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.sql.Timestamp;
@@ -18,6 +19,7 @@ import java.util.stream.Collectors;
  * Counts how many entities are in each of the discriminated state subsets, for all entities whose state transition events were merged into this
  * backlog.
  */
+@Slf4j
 public class Backlog {
 	private static final int CELLS_HASH_MAP_INITIAL_CAPACITY = 8192;
 
@@ -153,9 +155,10 @@ public class Backlog {
 	 */
 	@NoArgsConstructor
 	private static class Cell {
-		private Set<String> entities = new HashSet<>();
+		private Set<String> present = new HashSet<>();
 		private final Set<String> addedWhenAlreadyPresent = new HashSet<>();
 		private final Set<String> removedWhenAbsent = new HashSet<>();
+		private final Set<String> visited = new HashSet<>();
 		private int population;
 		private int variation;
 
@@ -166,15 +169,19 @@ public class Backlog {
 		private void increment(String entityId) {
 			this.population += 1;
 			this.variation += 1;
-			var wasAbsent = this.entities.add(entityId);
+			var wasAbsent = this.present.add(entityId);
 			if (!wasAbsent) { addedWhenAlreadyPresent.add(entityId); }
 		}
 
 		private void decrement(String entityId) {
 			this.population -= 1;
 			this.variation -= 1;
-			var wasPresent = this.entities.remove(entityId);
-			if (!wasPresent) { removedWhenAbsent.add(entityId); }
+			var wasPresent = this.present.remove(entityId);
+			if (wasPresent) {
+				visited.add(entityId);
+			} else {
+				removedWhenAbsent.add(entityId);
+			}
 		}
 	}
 
