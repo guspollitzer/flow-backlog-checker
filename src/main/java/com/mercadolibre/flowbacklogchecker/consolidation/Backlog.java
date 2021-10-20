@@ -37,6 +37,17 @@ public class Backlog {
 
 	public final Map<Index, Cell> cells;
 
+	public final Map<String, List<EventRecord>> trajectoriesByEntity;
+
+	/** the amount of entities that where created */
+	public int created = 0;
+	/** the amount of entities that where destroyed */
+	public int totalDestroyed = 0;
+	/** the amount of entities that where destroyed after having been created */
+	public int destroyedOfCreated = 0;
+	/** the amount of entities that where destroyed but not created */
+	public int destroyedOfNotCreated = 0;
+
 	public Backlog(
 			final PartitionsCatalog partitionsCatalog,
 			final EventRecordParser eventRecordParser,
@@ -49,6 +60,7 @@ public class Backlog {
 		this.initialPhotoWasTakenOn = initialPhotoWasTakenOn;
 
 		this.cells = new HashMap<>(CELLS_HASH_MAP_INITIAL_CAPACITY);
+		this.trajectoriesByEntity = new HashMap<>(65536);
 	}
 
 	public Timestamp getInitialPhotoWasTakenOn() {
@@ -80,31 +92,38 @@ public class Backlog {
 		this.lastEventArrivalSerialNumber = eventRecord.arrivalSerialNumber;
 		// ignore consecutive copies of the same event for each entity.
 
+		var trajectory = trajectoriesByEntity.computeIfAbsent(eventRecord.entityId, entityId -> new ArrayList<>(16));
+		trajectory.add(eventRecord);
+
 		final TransitionEvent transitionEvent = eventRecordParser.parse(eventRecord);
 
 		final EntityState oldState = transitionEvent.getOldState();
 		if (oldState != null) {
 			final Index fromIndex = indexOf(oldState);
 			this.getCell(fromIndex).decrement(eventRecord);
+		} else {
+			created += 1;
 		}
 
 		final EntityState newState = transitionEvent.getNewState();
-		if (newState != null) {
+		if (newState == null || "OUT".equals(newState.getStatus())) {
+			if (trajectory.stream().anyMatch(er -> "null".equals(er.oldStateRawJson))) {
+				destroyedOfCreated += 1;
+				if (!checkTrajectory(trajectory)) {
+					log.warn(
+							"Irregular trajectory: {}",
+							trajectory.stream().map(EventRecord::toString).collect(Collectors.joining("\n\t", "[\n\t", "]"))
+					);
+				}
+			} else {
+				destroyedOfNotCreated += 1;
+			}
+			totalDestroyed += 1;
+			trajectoriesByEntity.remove(eventRecord.entityId);
+
+		} else {
 			final Index toIndex = indexOf(transitionEvent.getNewState());
 			this.getCell(toIndex).increment(eventRecord);
-
-			if ("TO_DISPATCH".equals(newState.getStatus())) {
-				var trajectory = entityTrajectory(eventRecord.getEntityId());
-				if (trajectory.stream().anyMatch(er -> "null".equals(er.oldStateRawJson))) {
-					if (!checkTrajectory(trajectory)) {
-						log.warn(
-								"Irregular trajectory: {}",
-								trajectory.stream().map(EventRecord::toString).collect(Collectors.joining("\n\t", "[\n\t", "]"))
-						);
-					}
-				}
-
-			}
 		}
 	}
 
@@ -167,10 +186,9 @@ public class Backlog {
 	public static class Cell {
 		private int population;
 		private int variation;
-		private Set<String> present = new HashSet<>();
+		private final Set<String> present = new HashSet<>();
 		private int addedWhenAlreadyPresent = 0;
 		private int removedWhenAbsent = 0;
-		private HashMap<String, List<EventRecord>> visitedBy = new HashMap<>();
 
 		private Cell(int population) {
 			this.population = population;
@@ -180,9 +198,6 @@ public class Backlog {
 			this.population += 1;
 			this.variation += 1;
 			var entityId = eventRecord.getEntityId();
-
-			var records = visitedBy.computeIfAbsent(entityId, k -> new LinkedList<>());
-			records.add(eventRecord);
 
 			var wasAbsent = this.present.add(entityId);
 			if (!wasAbsent) { addedWhenAlreadyPresent += 1; }
@@ -200,8 +215,7 @@ public class Backlog {
 
 		public String toString() {
 			return "Cell(population=" + this.population + ", variation=" + this.variation + ", present=" + this.present.size()
-					+ ", addedWhenAlreadyPresent=" + this.addedWhenAlreadyPresent + ", removedWhenAbsent=" + this.removedWhenAbsent + ", visitedBy="
-					+ this.visitedBy.size() + ")";
+					+ ", addedWhenAlreadyPresent=" + this.addedWhenAlreadyPresent + ", removedWhenAbsent=" + this.removedWhenAbsent + ")";
 		}
 	}
 
@@ -227,15 +241,6 @@ public class Backlog {
 		}
 
 		public String toString() {return Arrays.deepToString(this.indexValues);}
-	}
-
-	public List<EventRecord> entityTrajectory(String entityId) {
-		return cells.values().stream()
-				.filter(cell -> cell.visitedBy.containsKey(entityId))
-				.map(cell -> cell.visitedBy.get(entityId))
-				.flatMap(Collection::stream)
-				.sorted(Comparator.comparingLong(er -> er.arrivalSerialNumber))
-				.collect(Collectors.toList());
 	}
 
 	public boolean checkTrajectory(List<EventRecord> trajectory) {

@@ -34,4 +34,5 @@ build/
 
 ### Log ###
 /file.log
+/file.log*.gz
 /hs_err_pid*.log
