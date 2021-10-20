@@ -3,20 +3,20 @@
     <!-- Para ver los archivos incluidos ir a: https://github.com/spring-projects/spring-boot/tree/main/spring-boot-project/spring-boot/src/main/resources/org/springframework/boot/logging/logback -->
 
     <include resource="org/springframework/boot/logging/logback/defaults.xml" />
-
+    <property name="CONSOLE_LOG_CHARSET" value="UTF-8"/>
     <include resource="org/springframework/boot/logging/logback/console-appender.xml" />
     <appender name="ASYNC_CONSOLE" class="ch.qos.logback.classic.AsyncAppender">
         <appender-ref ref="CONSOLE" />
     </appender>
 
-    <!--    <property name="LOG_FILE" value="${LOG_FILE:-${LOG_PATH:-${LOG_TEMP:-${java.io.tmpdir:-/tmp}}}/spring.log}"/>-->
-    <!--    <include resource="org/springframework/boot/logging/logback/file-appender.xml" />-->
-    <!--    <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">-->
-    <!--        <appender-ref ref="FILE" />-->
-    <!--    </appender>-->
+    <property name="LOG_FILE" value="${LOG_FILE:-${LOG_PATH:-${LOG_TEMP:-${java.io.tmpdir:-/tmp}}}/spring.log}"/>
+    <include resource="org/springframework/boot/logging/logback/file-appender.xml" />
+    <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
+        <appender-ref ref="FILE" />
+    </appender>
 
     <root level="INFO">
         <appender-ref ref="ASYNC_CONSOLE" />
+        <appender-ref ref="ASYNC_FILE" />
     </root>
-    <logger name="org.springframework" level="INFO" additivity="false"/>
 </configuration>

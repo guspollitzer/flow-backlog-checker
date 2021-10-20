@@ -30,7 +30,7 @@ public enum EntityType {
 	 * List of the {@link VersionedStructure}s corresponding to this {@link EntityType} instance, in descending order of
 	 * the {@link VersionedStructure#startingVersion} field
 	 */
-	private final VersionedStructure[] versionedStructures;
+	public final VersionedStructure[] versionedStructures;
 
 	EntityType(String id, VersionedStructure... versionedStructures) {
 		this.id = id;
@@ -63,7 +63,7 @@ public enum EntityType {
 	}
 
 	@RequiredArgsConstructor
-	private static class VersionedStructure {
+	public static class VersionedStructure {
 		/**
 		 * Incoming events whose struct version field is between this number inclusive and the startingVersion of the
 		 */
@@ -78,15 +78,15 @@ public enum EntityType {
 	@Setter
 	@NoArgsConstructor
 	public static class OutboundUnitStateV0 implements EntityState {
-		private String warehouseId;
+		public String warehouseId;
 
-		private String groupType;
+		public String groupType;
 
-		private String status;
+		public String status;
 
-		private String storageId;
+		public String storageId;
 
-		private Timestamp estimatedTimeDeparture;
+		public Timestamp estimatedTimeDeparture;
 
 		@Override
 		public String getLogisticCenter() {

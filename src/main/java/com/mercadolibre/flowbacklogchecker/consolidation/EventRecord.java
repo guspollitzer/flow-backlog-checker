@@ -3,6 +3,7 @@ package com.mercadolibre.flowbacklogchecker.consolidation;
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import lombok.ToString;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -12,6 +13,7 @@ import java.sql.SQLException;
  */
 @Getter
 @RequiredArgsConstructor
+@ToString
 public class EventRecord {
 	/**
 	 * The sequence number generated and associated to this event after it arrived to this app when it was stored in the
