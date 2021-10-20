@@ -4,12 +4,10 @@ package com.mercadolibre.flowbacklogchecker.consolidation;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
-import java.sql.SQLException;
 
 /**
  * An {@link EventsSource} that pushes the events stored in the "incoming_events" table.
@@ -46,7 +44,10 @@ public class StoredEventsSource implements EventsSource {
 			}
 			log.info("The events whose arrival serial is between {} and {} where provided", pageStartingSerial, lastProvidedSerial);
 
-		} while (lastProvidedSerial > pageStartingSerial);
+			if (lastProvidedSerial == pageStartingSerial) {
+				Thread.onSpinWait();
+			}
+		} while (true);
 
 		//////
 

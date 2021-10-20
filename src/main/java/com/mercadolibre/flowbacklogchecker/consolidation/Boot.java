@@ -4,63 +4,54 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
-import com.fasterxml.jackson.databind.PropertyNamingStrategy;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.fasterxml.jackson.module.paramnames.ParameterNamesModule;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.jdbc.DataSourceBuilder;
-import org.springframework.jdbc.core.JdbcTemplate;
-
-import javax.sql.DataSource;
 
 import java.io.IOException;
 import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.text.SimpleDateFormat;
 import java.util.TimeZone;
 
 @Slf4j
 public class Boot {
+	private static final String URL = "jdbc:mysql://proxysql.slave.meliseginf.com:6612/backlogprd?useUnicode=yes&characterEncoding=UTF-8&useSSL=false&useLegacyDatetimeCode=false&serverTimezone=UTC&autoReconnect=true&failOverReadOnly=false&maxReconnects=10";
 
-//	public final DataSource dataSource;
-//	public final JdbcTemplate jdbcTemplate;
 	public PartitionsCatalog partitionsCatalog;
 	public EventRecordParser eventRecordParser;
-	public StoredEventsSource storedEventsSource;
 
-	@SneakyThrows
 	public Boot() {
-		var url = "jdbc:mysql://proxysql.slave.meliseginf.com:6612/backlogprd?useUnicode=yes&characterEncoding=UTF-8&useSSL=false&useLegacyDatetimeCode=false&serverTimezone=UTC&autoReconnect=true&failOverReadOnly=false&maxReconnects=10";
-		var connection = DriverManager.getConnection(url, System.getenv("DB_USER"), System.getenv("DB_PASSWORD"));
-//		dataSource = DataSourceBuilder.create()
-//				.username(System.getenv("DB_USER"))
-//				.password(System.getenv("DB_PASSWORD"))
-//				.driverClassName("com.mysql.cj.jdbc.Driver")
-//				.url(url)
-//				.build();
-//		jdbcTemplate = new JdbcTemplate(dataSource);
-
 		partitionsCatalog = new PartitionsCatalog();
 		eventRecordParser = new EventRecordParser(objectMapper());
-		storedEventsSource = new StoredEventsSource(connection);
 	}
 
 	public void start(final long startingArrivalSerialNumber) {
-		log.info("Starting...");
-		Backlog backlog;
+		Backlog backlog = new Backlog(partitionsCatalog, eventRecordParser, startingArrivalSerialNumber, null);
+		log.info("Connecting...");
 		try {
-			backlog = new Backlog(partitionsCatalog, eventRecordParser, startingArrivalSerialNumber, null);
-			final long serialNumberOfLastEventOfLastPhoto = backlog.getLastEventArrivalSerialNumber();
-			storedEventsSource.provideWhile(
-					serialNumberOfLastEventOfLastPhoto,
-					() -> true,
-					eventConsolidator(backlog, serialNumberOfLastEventOfLastPhoto)
-			);
+			while (true) {
+				try (var connection = DriverManager.getConnection(URL, System.getenv("DB_USER"), System.getenv("DB_PASSWORD"))) {
+					log.info("Connected");
+					final StoredEventsSource storedEventsSource = new StoredEventsSource(connection);
 
-		} finally {
-			log.info("Finishing...");
+					final long serialNumberOfLastEventOfLastPhoto = backlog.getLastEventArrivalSerialNumber();
+					storedEventsSource.provideWhile(
+							serialNumberOfLastEventOfLastPhoto,
+							() -> true,
+							eventConsolidator(backlog, serialNumberOfLastEventOfLastPhoto)
+					);
+
+				} catch (SQLException sqlException) {
+					log.error("Connection lost :", sqlException);
+					Thread.sleep(10000);
+					log.info("Reconnecting...");
+				}
+			}
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
 		}
 	}
 
