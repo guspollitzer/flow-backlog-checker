@@ -3,16 +3,12 @@ package com.mercadolibre.flowbacklogchecker.consolidation;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
+import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.sql.Timestamp;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -25,21 +21,21 @@ public class Backlog {
 
 	private static final int LAST_MERGED_EVENTS_HASH_MAP_INITIAL_CAPACITY = 8192;
 
-	private final PartitionsCatalog partitionsCatalog;
+	public final PartitionsCatalog partitionsCatalog;
 
-	private final EventRecordParser eventRecordParser;
+	public final EventRecordParser eventRecordParser;
 
 	/**
 	 * The date of the backlog photo this backlog was initialized with.
 	 */
-	private final Timestamp initialPhotoWasTakenOn;
+	public final Timestamp initialPhotoWasTakenOn;
 
 	/**
 	 * The arrival serial number of the last event that was merged into this backlog.
 	 */
-	private long lastEventArrivalSerialNumber;
+	public long lastEventArrivalSerialNumber;
 
-	private final Map<Index, Cell> cells;
+	public final Map<Index, Cell> cells;
 
 	public Backlog(
 			final PartitionsCatalog partitionsCatalog,
@@ -89,13 +85,26 @@ public class Backlog {
 		final EntityState oldState = transitionEvent.getOldState();
 		if (oldState != null) {
 			final Index fromIndex = indexOf(oldState);
-			this.getCell(fromIndex).decrement(transitionEvent.getEntityId());
+			this.getCell(fromIndex).decrement(eventRecord);
 		}
 
 		final EntityState newState = transitionEvent.getNewState();
 		if (newState != null) {
 			final Index toIndex = indexOf(transitionEvent.getNewState());
-			this.getCell(toIndex).increment(transitionEvent.getEntityId());
+			this.getCell(toIndex).increment(eventRecord);
+
+			if ("TO_DISPATCH".equals(newState.getStatus())) {
+				var trajectory = entityTrajectory(eventRecord.getEntityId());
+				if (trajectory.stream().anyMatch(er -> "null".equals(er.oldStateRawJson))) {
+					if (!checkTrajectory(trajectory)) {
+						log.warn(
+								"Irregular trajectory: {}",
+								trajectory.stream().map(EventRecord::toString).collect(Collectors.joining("\n\t", "[\n\t", "]"))
+						);
+					}
+				}
+
+			}
 		}
 	}
 
@@ -119,7 +128,7 @@ public class Backlog {
 	/**
 	 * Finds out the {@link Index} of the {@link Cell} that contains the specified {@link EntityState}.
 	 */
-	private Index indexOf(EntityState ite) {
+	public Index indexOf(EntityState ite) {
 		final var partitionParts = new Object[partitionsCatalog.getPartitions().size()];
 		for (Partition partition : partitionsCatalog.getPartitions()) {
 			partitionParts[partition.getOrdinal()] = partition.discriminator().apply(ite);
@@ -130,7 +139,7 @@ public class Backlog {
 	/**
 	 * Gives the {@link Cell} pointed by the specified {@link Index}
 	 */
-	private Cell getCell(Index index) {
+	public Cell getCell(Index index) {
 		Cell cell = this.cells.get(index);
 		if (cell == null) {
 			cell = new Cell();
@@ -141,6 +150,7 @@ public class Backlog {
 
 	@Getter
 	@RequiredArgsConstructor
+	@ToString
 	public static class IndexCellEntry {
 		final Object[] indexValues;
 
@@ -154,41 +164,51 @@ public class Backlog {
 	 * Each cell knows how many entities have their state inside it.
 	 */
 	@NoArgsConstructor
-	private static class Cell {
-		private Set<String> present = new HashSet<>();
-		private final Set<String> addedWhenAlreadyPresent = new HashSet<>();
-		private final Set<String> removedWhenAbsent = new HashSet<>();
-		private final Set<String> visited = new HashSet<>();
+	public static class Cell {
 		private int population;
 		private int variation;
+		private Set<String> present = new HashSet<>();
+		private int addedWhenAlreadyPresent = 0;
+		private int removedWhenAbsent = 0;
+		private HashMap<String, List<EventRecord>> visitedBy = new HashMap<>();
 
 		private Cell(int population) {
 			this.population = population;
 		}
 
-		private void increment(String entityId) {
+		private void increment(EventRecord eventRecord) {
 			this.population += 1;
 			this.variation += 1;
+			var entityId = eventRecord.getEntityId();
+
+			var records = visitedBy.computeIfAbsent(entityId, k -> new LinkedList<>());
+			records.add(eventRecord);
+
 			var wasAbsent = this.present.add(entityId);
-			if (!wasAbsent) { addedWhenAlreadyPresent.add(entityId); }
+			if (!wasAbsent) { addedWhenAlreadyPresent += 1; }
 		}
 
-		private void decrement(String entityId) {
+		private void decrement(EventRecord eventRecord) {
 			this.population -= 1;
 			this.variation -= 1;
+			var entityId = eventRecord.getEntityId();
 			var wasPresent = this.present.remove(entityId);
-			if (wasPresent) {
-				visited.add(entityId);
-			} else {
-				removedWhenAbsent.add(entityId);
+			if (!wasPresent) {
+				removedWhenAbsent += 1;
 			}
+		}
+
+		public String toString() {
+			return "Cell(population=" + this.population + ", variation=" + this.variation + ", present=" + this.present.size()
+					+ ", addedWhenAlreadyPresent=" + this.addedWhenAlreadyPresent + ", removedWhenAbsent=" + this.removedWhenAbsent + ", visitedBy="
+					+ this.visitedBy.size() + ")";
 		}
 	}
 
 	/**
 	 * A multidimensional index. Instances of this class identify a {@link Cell} of the entity's discrete state space.
 	 */
-	private static class Index {
+	public static class Index {
 		private final Object[] indexValues;
 
 		private final transient int hash;
@@ -205,5 +225,47 @@ public class Backlog {
 		public int hashCode() {
 			return hash;
 		}
+
+		public String toString() {return Arrays.deepToString(this.indexValues);}
 	}
+
+	public List<EventRecord> entityTrajectory(String entityId) {
+		return cells.values().stream()
+				.filter(cell -> cell.visitedBy.containsKey(entityId))
+				.map(cell -> cell.visitedBy.get(entityId))
+				.flatMap(Collection::stream)
+				.sorted(Comparator.comparingLong(er -> er.arrivalSerialNumber))
+				.collect(Collectors.toList());
+	}
+
+	public boolean checkTrajectory(List<EventRecord> trajectory) {
+		for (int i = 1; i < trajectory.size(); ++i) {
+			if (!trajectory.get(i).oldStateRawJson.equals(trajectory.get(i - 1).newStateRawJson)) {
+				LinkedList<EventRecord> looseLinks = new LinkedList<>(trajectory);
+				var first = looseLinks.pollFirst();
+				return areSortable(first.newStateRawJson, first.oldStateRawJson, looseLinks);
+			}
+		}
+		return true;
+	}
+
+
+	public boolean areSortable(String newerSide, String olderSide, LinkedList<EventRecord> looseLinks) {
+		if (looseLinks.isEmpty()) {
+			return true;
+		} else {
+			for (var link : looseLinks) {
+				if (link.oldStateRawJson.equals(newerSide)) {
+					looseLinks.removeFirstOccurrence(link);
+					return areSortable(link.newStateRawJson, olderSide, looseLinks);
+				} else if (link.newStateRawJson.equals(olderSide)) {
+					looseLinks.removeFirstOccurrence(link);
+					return areSortable(newerSide, link.oldStateRawJson, looseLinks);
+				}
+			}
+			return false;
+		}
+	}
+
+
 }

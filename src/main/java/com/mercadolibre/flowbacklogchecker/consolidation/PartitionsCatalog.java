@@ -12,7 +12,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class PartitionsCatalog {
 
-	private final List<Partition> partitions = Arrays.asList(PartitionsDb.values());
+	public final List<Partition> partitions = Arrays.asList(PartitionsDb.values());
 
 	public List<Partition> getPartitions() {
 		return partitions;
@@ -26,9 +26,9 @@ public class PartitionsCatalog {
 		status("status", EntityState::getStatus),
 		deadline("date_out", EntityState::getDeadline);
 
-		private final String columnName;
+		public  final String columnName;
 
-		private final Function<EntityState, Object> valueGetter;
+		public  final Function<EntityState, Object> valueGetter;
 
 		@Override
 		public String getColumnName() {

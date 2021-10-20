@@ -1,13 +1,14 @@
 package com.mercadolibre.flowbacklogchecker;
 
-import org.springframework.boot.SpringApplication;
+import com.mercadolibre.flowbacklogchecker.consolidation.Boot;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
 public class FlowBacklogCheckerApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(FlowBacklogCheckerApplication.class, args);
+		var boot = new Boot();
+		boot.start(107843100);
 	}
 
 }
