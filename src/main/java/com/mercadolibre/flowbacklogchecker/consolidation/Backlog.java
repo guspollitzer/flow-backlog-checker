@@ -19,8 +19,6 @@ import java.util.stream.Collectors;
 public class Backlog {
 	private static final int CELLS_HASH_MAP_INITIAL_CAPACITY = 8192;
 
-	private static final int LAST_MERGED_EVENTS_HASH_MAP_INITIAL_CAPACITY = 8192;
-
 	public final PartitionsCatalog partitionsCatalog;
 
 	public final EventRecordParser eventRecordParser;
@@ -48,6 +46,8 @@ public class Backlog {
 	/** the amount of entities that where destroyed but not created */
 	public int destroyedOfNotCreated = 0;
 
+	public int irregularTrajectories = 0;
+
 	public Backlog(
 			final PartitionsCatalog partitionsCatalog,
 			final EventRecordParser eventRecordParser,
@@ -61,17 +61,6 @@ public class Backlog {
 
 		this.cells = new HashMap<>(CELLS_HASH_MAP_INITIAL_CAPACITY);
 		this.trajectoriesByEntity = new HashMap<>(65536);
-	}
-
-	public Timestamp getInitialPhotoWasTakenOn() {
-		return this.initialPhotoWasTakenOn;
-	}
-
-	/**
-	 * Tells how many cells were traversed by an entity state.
-	 */
-	public int getNumberOfCellsTraversed() {
-		return cells.size();
 	}
 
 	/**
@@ -90,7 +79,6 @@ public class Backlog {
 	public void merge(final EventRecord eventRecord) throws EventRecordParser.NotSupportedStructureVersion, IOException {
 		assert (eventRecord.arrivalSerialNumber > this.lastEventArrivalSerialNumber);
 		this.lastEventArrivalSerialNumber = eventRecord.arrivalSerialNumber;
-		// ignore consecutive copies of the same event for each entity.
 
 		var trajectory = trajectoriesByEntity.computeIfAbsent(eventRecord.entityId, entityId -> new ArrayList<>(16));
 		trajectory.add(eventRecord);
@@ -100,7 +88,9 @@ public class Backlog {
 		final EntityState oldState = transitionEvent.getOldState();
 		if (oldState != null) {
 			final Index fromIndex = indexOf(oldState);
-			this.getCell(fromIndex).decrement(eventRecord);
+			if (this.getCell(fromIndex).decrement(eventRecord)) {
+				this.cells.remove(fromIndex);
+			}
 		} else {
 			created += 1;
 		}
@@ -110,8 +100,10 @@ public class Backlog {
 			if (trajectory.stream().anyMatch(er -> "null".equals(er.oldStateRawJson))) {
 				destroyedOfCreated += 1;
 				if (!checkTrajectory(trajectory)) {
+					irregularTrajectories += 1;
 					log.warn(
-							"Irregular trajectory: {}",
+							"Irregular trajectory #{}: {}",
+							irregularTrajectories,
 							trajectory.stream().map(EventRecord::toString).collect(Collectors.joining("\n\t", "[\n\t", "]"))
 					);
 				}
@@ -125,23 +117,6 @@ public class Backlog {
 			final Index toIndex = indexOf(transitionEvent.getNewState());
 			this.getCell(toIndex).increment(eventRecord);
 		}
-	}
-
-	public void loadCell(Object[] indexValues, int population) {
-		this.cells.put(new Index(indexValues), new Cell(population));
-	}
-
-	/**
-	 * Gives a list containing all the index-cell entries whose population or variation is not zero.
-	 */
-	public List<IndexCellEntry> getIndexCellEntries() {
-		return this.cells.entrySet().stream()
-				.filter(e -> e.getValue().population != 0 || e.getValue().variation != 0)
-				.map(e -> new IndexCellEntry(
-						e.getKey().indexValues,
-						e.getValue().population,
-						e.getValue().variation
-				)).collect(Collectors.toList());
 	}
 
 	/**
@@ -185,36 +160,30 @@ public class Backlog {
 	@NoArgsConstructor
 	public static class Cell {
 		private int population;
-		private int variation;
 		private final Set<String> present = new HashSet<>();
 		private int addedWhenAlreadyPresent = 0;
 		private int removedWhenAbsent = 0;
 
-		private Cell(int population) {
-			this.population = population;
-		}
-
 		private void increment(EventRecord eventRecord) {
 			this.population += 1;
-			this.variation += 1;
 			var entityId = eventRecord.getEntityId();
 
 			var wasAbsent = this.present.add(entityId);
 			if (!wasAbsent) { addedWhenAlreadyPresent += 1; }
 		}
 
-		private void decrement(EventRecord eventRecord) {
+		private boolean decrement(EventRecord eventRecord) {
 			this.population -= 1;
-			this.variation -= 1;
 			var entityId = eventRecord.getEntityId();
 			var wasPresent = this.present.remove(entityId);
 			if (!wasPresent) {
 				removedWhenAbsent += 1;
 			}
+			return population == 0 && present.isEmpty();
 		}
 
 		public String toString() {
-			return "Cell(population=" + this.population + ", variation=" + this.variation + ", present=" + this.present.size()
+			return "Cell(population=" + this.population + ", present=" + this.present.size()
 					+ ", addedWhenAlreadyPresent=" + this.addedWhenAlreadyPresent + ", removedWhenAbsent=" + this.removedWhenAbsent + ")";
 		}
 	}
