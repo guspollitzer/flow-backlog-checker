@@ -8,7 +8,7 @@ public class FlowBacklogCheckerApplication {
 
 	public static void main(String[] args) {
 		var boot = new Boot();
-		boot.start(119348000);
+		boot.start(Long.parseLong(args[1]));
 	}
 
 }
