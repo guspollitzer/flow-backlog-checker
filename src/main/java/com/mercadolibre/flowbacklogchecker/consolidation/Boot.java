@@ -29,7 +29,7 @@ public class Boot {
 	}
 
 	public void start(final long startingArrivalSerialNumber) {
-		Backlog backlog = new Backlog(partitionsCatalog, eventRecordParser, startingArrivalSerialNumber, null);
+		Backlog backlog = new Backlog(partitionsCatalog, startingArrivalSerialNumber, null);
 		log.info("Connecting...");
 		try {
 			while (true) {
@@ -41,9 +41,8 @@ public class Boot {
 					storedEventsSource.provideWhile(
 							serialNumberOfLastEventOfLastPhoto,
 							() -> true,
-							eventConsolidator(backlog, serialNumberOfLastEventOfLastPhoto)
+							buildEventIntegrator(backlog, serialNumberOfLastEventOfLastPhoto)
 					);
-
 				} catch (SQLException sqlException) {
 					log.error("Connection lost :", sqlException);
 					Thread.sleep(10000);
@@ -55,10 +54,12 @@ public class Boot {
 		}
 	}
 
-	private EventsSource.Sink eventConsolidator(final Backlog backlog, final long serialNumberOfLastEventOfLastPhoto) {
+	/** Builds a pure effect procedure that integrates the event it receives into the specified backlog. */
+	private EventsSource.Sink buildEventIntegrator(final Backlog backlog, final long serialNumberOfLastEventOfLastPhoto) {
 		return eventRecord -> {
 			try {
-				backlog.merge(eventRecord);
+				final TransitionEvent transitionEvent = eventRecordParser.parse(eventRecord);
+				backlog.merge(transitionEvent);
 			} catch (IOException | EventRecordParser.NotSupportedStructureVersion e) {
 				final String message = String.format(
 						"The incoming event with arrival serial number %d was discarded because the conversion form "
@@ -72,7 +73,6 @@ public class Boot {
 			}
 		};
 	}
-
 
 	public ObjectMapper objectMapper() {
 		final String DATE_FORMAT = "yyyy-MM-dd'T'HH:mm:ss'Z'";

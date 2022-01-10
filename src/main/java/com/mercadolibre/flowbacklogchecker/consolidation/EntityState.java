@@ -15,5 +15,16 @@ public interface EntityState {
 
 	String getArea();
 
+	Timestamp getDateIn();
+
 	Timestamp getDeadline();
+
+	/**
+	 * Tells if this state is the last one: the entity will remain in this state for the rest of eternity.
+	 *
+	 * @return true if this state is the last one.
+	 */
+	boolean isUltimate();
+
+	int getQuantity();
 }

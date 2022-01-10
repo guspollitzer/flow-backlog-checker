@@ -12,23 +12,28 @@ import org.springframework.stereotype.Service;
 @Service
 public class PartitionsCatalog {
 
-	public final List<Partition> partitions = Arrays.asList(PartitionsDb.values());
+	private final List<Partition> partitions = Arrays.asList(PartitionsDb.values());
 
 	public List<Partition> getPartitions() {
 		return partitions;
 	}
 
+	public Partition getDeadLinePartition() {
+		return PartitionsDb.deadline;
+	}
+
 	@RequiredArgsConstructor
-	public enum PartitionsDb implements Partition {
+	private enum PartitionsDb implements Partition {
 		logisticCenter("logistic_center_id", EntityState::getLogisticCenter),
 		workflow("workflow", EntityState::getWorkflow),
 		area("area", state -> state.getArea() != null ? state.getArea() : "N/A"),
 		status("status", EntityState::getStatus),
+		dateIn("date_in", EntityState::getDateIn),
 		deadline("date_out", EntityState::getDeadline);
 
-		public  final String columnName;
+		private final String columnName;
 
-		public  final Function<EntityState, Object> valueGetter;
+		private final Function<EntityState, Object> valueGetter;
 
 		@Override
 		public String getColumnName() {

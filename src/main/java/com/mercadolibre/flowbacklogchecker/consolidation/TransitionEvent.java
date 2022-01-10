@@ -2,7 +2,9 @@ package com.mercadolibre.flowbacklogchecker.consolidation;
 
 public interface TransitionEvent {
 
-	String getEntityId();
+	long getEventId();
+
+	long getArrivalSerialNumber();
 
 	EntityState getNewState();
 

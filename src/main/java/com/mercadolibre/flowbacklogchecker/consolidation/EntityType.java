@@ -1,6 +1,5 @@
 package com.mercadolibre.flowbacklogchecker.consolidation;
 
-
 import java.sql.Timestamp;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -11,11 +10,14 @@ import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 
+import static java.time.temporal.ChronoUnit.HOURS;
+
 /**
  * Contains the known entity types and different versions of their JSON structures.
  */
 public enum EntityType {
-	outboundUnit("outbound-unit", new VersionedStructure(0, OutboundUnitStateV0.class));
+	outboundUnit("outbound-unit", new VersionedStructure(0, OutboundUnitStateV0.class)),
+	inboundUnit("INBOUND_UNIT", new VersionedStructure(1, InboundUnitStateV1.class));
 
 	private static final Map<String, EntityType> ENTITY_TYPE_MAP = Arrays.stream(EntityType.values()).collect(
 			Collectors.toUnmodifiableMap(entityType -> entityType.id, Function.identity())
@@ -30,7 +32,7 @@ public enum EntityType {
 	 * List of the {@link VersionedStructure}s corresponding to this {@link EntityType} instance, in descending order of
 	 * the {@link VersionedStructure#startingVersion} field
 	 */
-	public final VersionedStructure[] versionedStructures;
+	private final VersionedStructure[] versionedStructures;
 
 	EntityType(String id, VersionedStructure... versionedStructures) {
 		this.id = id;
@@ -63,7 +65,7 @@ public enum EntityType {
 	}
 
 	@RequiredArgsConstructor
-	public static class VersionedStructure {
+	private static class VersionedStructure {
 		/**
 		 * Incoming events whose struct version field is between this number inclusive and the startingVersion of the
 		 */
@@ -78,15 +80,17 @@ public enum EntityType {
 	@Setter
 	@NoArgsConstructor
 	public static class OutboundUnitStateV0 implements EntityState {
-		public String warehouseId;
+		private String warehouseId;
 
-		public String groupType;
+		private String groupType;
 
-		public String status;
+		private String status;
 
-		public String storageId;
+		private String storageId;
 
-		public Timestamp estimatedTimeDeparture;
+		private Timestamp estimatedTimeDeparture;
+
+		private boolean ultimate;
 
 		@Override
 		public String getLogisticCenter() {
@@ -110,8 +114,78 @@ public enum EntityType {
 		}
 
 		@Override
+		public Timestamp getDateIn() { return new Timestamp(0); }
+
+		@Override
 		public Timestamp getDeadline() {
 			return estimatedTimeDeparture;
+		}
+
+		@Override
+		public boolean isUltimate() {
+			return this.ultimate;
+		}
+
+		@Override
+		public int getQuantity() {
+			return 1;
+		}
+
+	}
+
+	@Setter
+	@NoArgsConstructor
+	public static class InboundUnitStateV1 implements EntityState {
+
+		private String warehouseId;
+
+		private String flowStep;
+
+		private Timestamp appointmentDate;
+
+		private Timestamp slaExpirationDate;
+
+		private int unitQuantity;
+
+		@Override
+		public String getLogisticCenter() {
+			return warehouseId;
+		}
+
+		@Override
+		public String getWorkflow() {
+			return "inbound";
+		}
+
+		@Override
+		public String getStatus() {
+			return flowStep;
+		}
+
+		@Override
+		public String getArea() {
+			return null;
+		}
+
+		@Override
+		public Timestamp getDateIn() {
+			boolean condition = appointmentDate == null || !"SCHEDULED".equals(flowStep);
+			return condition ? new Timestamp(0) : Timestamp.from(appointmentDate.toInstant().truncatedTo(HOURS));
+		}
+
+		@Override
+		public Timestamp getDeadline() {
+			return slaExpirationDate == null ? new Timestamp(0) : Timestamp.from(slaExpirationDate.toInstant().truncatedTo(HOURS));
+		}
+
+		@Override
+		public boolean isUltimate() {
+			return false;
+		}
+
+		@Override
+		public int getQuantity() {
+			return unitQuantity;
 		}
 	}
 }

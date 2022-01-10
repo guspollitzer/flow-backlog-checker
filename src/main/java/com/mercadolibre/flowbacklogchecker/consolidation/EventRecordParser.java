@@ -1,6 +1,5 @@
 package com.mercadolibre.flowbacklogchecker.consolidation;
 
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import lombok.Getter;
@@ -13,10 +12,13 @@ public class EventRecordParser {
 	private final ObjectMapper objectMapper;
 
 	public TransitionEvent parse(final EventRecord eventRecord) throws IOException, NotSupportedStructureVersion {
-		Class<? extends EntityState> structure =
-				EntityType.determineStructure(eventRecord.entityType, eventRecord.structVersion);
+		Class<? extends EntityState> structure = EntityType.determineStructure(
+				eventRecord.entityType,
+				eventRecord.structVersion);
+
 		return new TransitionEventImpl(
-				eventRecord.getEntityId(),
+				eventRecord.eventId,
+				eventRecord.arrivalSerialNumber,
 				objectMapper.readValue(eventRecord.newStateRawJson, structure),
 				objectMapper.readValue(eventRecord.oldStateRawJson, structure)
 		);
@@ -25,7 +27,9 @@ public class EventRecordParser {
 	@Getter
 	@RequiredArgsConstructor
 	public static class TransitionEventImpl implements TransitionEvent {
-		public final String entityId;
+		public final long eventId;
+
+		public final long arrivalSerialNumber;
 
 		public final EntityState newState;
 
