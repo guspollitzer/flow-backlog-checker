@@ -46,6 +46,8 @@ public class Backlog {
 	/** the amount of entities that where destroyed but not created */
 	public int destroyedOfNotCreated = 0;
 
+	public int discardedEvents = 0;
+
 	public int irregularTrajectories = 0;
 
 	public Backlog(
@@ -80,42 +82,50 @@ public class Backlog {
 		assert (eventRecord.arrivalSerialNumber > this.lastEventArrivalSerialNumber);
 		this.lastEventArrivalSerialNumber = eventRecord.arrivalSerialNumber;
 
-		var trajectory = trajectoriesByEntity.computeIfAbsent(eventRecord.entityId, entityId -> new ArrayList<>(16));
-		trajectory.add(eventRecord);
-
-		final TransitionEvent transitionEvent = eventRecordParser.parse(eventRecord);
-
-		final EntityState oldState = transitionEvent.getOldState();
-		if (oldState != null) {
-			final Index fromIndex = indexOf(oldState);
-			if (this.getCell(fromIndex).decrement(eventRecord)) {
-				this.cells.remove(fromIndex);
+		var trajectory = trajectoriesByEntity.get(eventRecord.entityId);
+		if  (trajectory != null || "null".equals(eventRecord.oldStateRawJson)) {
+			if (trajectory == null) {
+				trajectory = new ArrayList<>(16);
+				trajectoriesByEntity.put(eventRecord.entityId, trajectory);
 			}
-		} else {
-			created += 1;
-		}
+			trajectory.add(eventRecord);
 
-		final EntityState newState = transitionEvent.getNewState();
-		if (newState == null || "OUT".equals(newState.getStatus())) {
-			if (trajectory.stream().anyMatch(er -> "null".equals(er.oldStateRawJson))) {
-				destroyedOfCreated += 1;
-				if (!checkTrajectory(trajectory)) {
-					irregularTrajectories += 1;
-					log.warn(
-							"Irregular trajectory #{}: {}",
-							irregularTrajectories,
-							trajectory.stream().map(EventRecord::toString).collect(Collectors.joining("\n\t", "[\n\t", "]"))
-					);
+			final TransitionEvent transitionEvent = eventRecordParser.parse(eventRecord);
+
+			final EntityState oldState = transitionEvent.getOldState();
+			if (oldState != null) {
+				final Index fromIndex = indexOf(oldState);
+				if (this.getCell(fromIndex).decrement(eventRecord)) {
+					this.cells.remove(fromIndex);
 				}
 			} else {
-				destroyedOfNotCreated += 1;
+				created += 1;
 			}
-			totalDestroyed += 1;
-			trajectoriesByEntity.remove(eventRecord.entityId);
 
+			final EntityState newState = transitionEvent.getNewState();
+			if (newState == null || "OUT".equals(newState.getStatus())) {
+				if (trajectory.stream().anyMatch(er -> "null".equals(er.oldStateRawJson))) {
+					destroyedOfCreated += 1;
+					if (getLastStateOf(trajectory) == null) {
+						irregularTrajectories += 1;
+						log.warn(
+								"Irregular trajectory #{}: {}",
+								irregularTrajectories,
+								trajectory.stream().map(EventRecord::toString).collect(Collectors.joining("\n\t", "[\n\t", "]"))
+						);
+					}
+				} else {
+					destroyedOfNotCreated += 1;
+				}
+				totalDestroyed += 1;
+				trajectoriesByEntity.remove(eventRecord.entityId);
+
+			} else {
+				final Index toIndex = indexOf(newState);
+				this.getCell(toIndex).increment(eventRecord);
+			}
 		} else {
-			final Index toIndex = indexOf(transitionEvent.getNewState());
-			this.getCell(toIndex).increment(eventRecord);
+			discardedEvents += 1;
 		}
 	}
 
@@ -159,12 +169,12 @@ public class Backlog {
 	 */
 	@NoArgsConstructor
 	public static class Cell {
-		private int population;
-		private final Set<String> present = new HashSet<>();
-		private int addedWhenAlreadyPresent = 0;
-		private int removedWhenAbsent = 0;
+		public int population;
+		public final Set<String> present = new HashSet<>();
+		public int addedWhenAlreadyPresent = 0;
+		public int removedWhenAbsent = 0;
 
-		private void increment(EventRecord eventRecord) {
+		public void increment(EventRecord eventRecord) {
 			this.population += 1;
 			var entityId = eventRecord.getEntityId();
 
@@ -172,7 +182,7 @@ public class Backlog {
 			if (!wasAbsent) { addedWhenAlreadyPresent += 1; }
 		}
 
-		private boolean decrement(EventRecord eventRecord) {
+		public boolean decrement(EventRecord eventRecord) {
 			this.population -= 1;
 			var entityId = eventRecord.getEntityId();
 			var wasPresent = this.present.remove(entityId);
@@ -192,11 +202,11 @@ public class Backlog {
 	 * A multidimensional index. Instances of this class identify a {@link Cell} of the entity's discrete state space.
 	 */
 	public static class Index {
-		private final Object[] indexValues;
+		public final Object[] indexValues;
 
-		private final transient int hash;
+		public final transient int hash;
 
-		private Index(Object... indexValues) {
+		public Index(Object... indexValues) {
 			this.indexValues = indexValues;
 			this.hash = Arrays.hashCode(indexValues);
 		}
@@ -212,32 +222,32 @@ public class Backlog {
 		public String toString() {return Arrays.deepToString(this.indexValues);}
 	}
 
-	public boolean checkTrajectory(List<EventRecord> trajectory) {
+	public static String getLastStateOf(List<EventRecord> trajectory) {
 		for (int i = 1; i < trajectory.size(); ++i) {
 			if (!trajectory.get(i).oldStateRawJson.equals(trajectory.get(i - 1).newStateRawJson)) {
 				LinkedList<EventRecord> looseLinks = new LinkedList<>(trajectory);
 				var first = looseLinks.pollFirst();
-				return areSortable(first.newStateRawJson, first.oldStateRawJson, looseLinks);
+				return getLastStateOf_loop(first.newStateRawJson, first.oldStateRawJson, looseLinks);
 			}
 		}
-		return true;
+		return trajectory.get(trajectory.size()-1).newStateRawJson;
 	}
 
 
-	public boolean areSortable(String newerSide, String olderSide, LinkedList<EventRecord> looseLinks) {
+	public static String getLastStateOf_loop(String newerSide, String olderSide, LinkedList<EventRecord> looseLinks) {
 		if (looseLinks.isEmpty()) {
-			return true;
+			return olderSide;
 		} else {
 			for (var link : looseLinks) {
 				if (link.oldStateRawJson.equals(newerSide)) {
 					looseLinks.removeFirstOccurrence(link);
-					return areSortable(link.newStateRawJson, olderSide, looseLinks);
+					return getLastStateOf_loop(link.newStateRawJson, olderSide, looseLinks);
 				} else if (link.newStateRawJson.equals(olderSide)) {
 					looseLinks.removeFirstOccurrence(link);
-					return areSortable(newerSide, link.oldStateRawJson, looseLinks);
+					return getLastStateOf_loop(newerSide, link.oldStateRawJson, looseLinks);
 				}
 			}
-			return false;
+			return null;
 		}
 	}
 

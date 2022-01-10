@@ -33,6 +33,5 @@ build/
 .vscode/
 
 ### Log ###
-/file.log
-/file.log*.gz
+/log/*
 /hs_err_pid*.log

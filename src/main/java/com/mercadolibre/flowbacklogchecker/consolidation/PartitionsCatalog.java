@@ -19,7 +19,7 @@ public class PartitionsCatalog {
 	}
 
 	@RequiredArgsConstructor
-	private enum PartitionsDb implements Partition {
+	public enum PartitionsDb implements Partition {
 		logisticCenter("logistic_center_id", EntityState::getLogisticCenter),
 		workflow("workflow", EntityState::getWorkflow),
 		area("area", state -> state.getArea() != null ? state.getArea() : "N/A"),
