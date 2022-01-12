@@ -6,6 +6,9 @@ import java.sql.Timestamp;
  * Knows the state of a monitored entity.
  */
 public interface EntityState {
+	String getEventType();
+
+	String getEntityId();
 
 	String getLogisticCenter();
 

@@ -16,7 +16,6 @@ import static java.time.temporal.ChronoUnit.HOURS;
  * Contains the known entity types and different versions of their JSON structures.
  */
 public enum EntityType {
-	outboundUnit("outbound-unit", new VersionedStructure(0, OutboundUnitStateV0.class)),
 	inboundUnit("INBOUND_UNIT", new VersionedStructure(1, InboundUnitStateV1.class));
 
 	private static final Map<String, EntityType> ENTITY_TYPE_MAP = Arrays.stream(EntityType.values()).collect(
@@ -79,63 +78,10 @@ public enum EntityType {
 
 	@Setter
 	@NoArgsConstructor
-	public static class OutboundUnitStateV0 implements EntityState {
-		private String warehouseId;
-
-		private String groupType;
-
-		private String status;
-
-		private String storageId;
-
-		private Timestamp estimatedTimeDeparture;
-
-		private boolean ultimate;
-
-		@Override
-		public String getLogisticCenter() {
-			return warehouseId;
-		}
-
-		@Override
-		public String getWorkflow() {
-			return String.format("OUTBOUND-%sS", groupType);
-		}
-
-		@Override
-		public String getStatus() {
-			return status;
-		}
-
-		@Override
-		public String getArea() {
-			final String[] addressFields = storageId != null ? storageId.split("-") : null;
-			return addressFields != null && addressFields.length > 1 ? addressFields[0] : null;
-		}
-
-		@Override
-		public Timestamp getDateIn() { return new Timestamp(0); }
-
-		@Override
-		public Timestamp getDeadline() {
-			return estimatedTimeDeparture;
-		}
-
-		@Override
-		public boolean isUltimate() {
-			return this.ultimate;
-		}
-
-		@Override
-		public int getQuantity() {
-			return 1;
-		}
-
-	}
-
-	@Setter
-	@NoArgsConstructor
 	public static class InboundUnitStateV1 implements EntityState {
+		private String eventType;
+
+		private String inboundId;
 
 		private String warehouseId;
 
@@ -146,6 +92,16 @@ public enum EntityType {
 		private Timestamp slaExpirationDate;
 
 		private int unitQuantity;
+
+		@Override
+		public String getEventType() {
+			return this.eventType;
+		}
+
+		@Override
+		public String getEntityId() {
+			return inboundId;
+		}
 
 		@Override
 		public String getLogisticCenter() {

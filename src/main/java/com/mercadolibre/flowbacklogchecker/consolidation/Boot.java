@@ -75,7 +75,7 @@ public class Boot {
 	}
 
 	public ObjectMapper objectMapper() {
-		final String DATE_FORMAT = "yyyy-MM-dd'T'HH:mm:ss'Z'";
+		final String DATE_FORMAT = "yyyy-MM-dd'T'HH:mm:ss";
 
 		final ObjectMapper objectMapper = new ObjectMapper()
 				.registerModule(new ParameterNamesModule())

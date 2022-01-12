@@ -29,7 +29,8 @@ public class PartitionsCatalog {
 		area("area", state -> state.getArea() != null ? state.getArea() : "N/A"),
 		status("status", EntityState::getStatus),
 		dateIn("date_in", EntityState::getDateIn),
-		deadline("date_out", EntityState::getDeadline);
+		deadline("date_out", EntityState::getDeadline),
+		entityId("inbound_shipment", EntityState::getEntityId);
 
 		private final String columnName;
 

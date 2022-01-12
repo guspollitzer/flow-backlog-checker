@@ -18,6 +18,7 @@ public class EventRecordParser {
 
 		return new TransitionEventImpl(
 				eventRecord.eventId,
+				Long.parseLong(eventRecord.entityId),
 				eventRecord.arrivalSerialNumber,
 				objectMapper.readValue(eventRecord.newStateRawJson, structure),
 				objectMapper.readValue(eventRecord.oldStateRawJson, structure)
@@ -29,11 +30,21 @@ public class EventRecordParser {
 	public static class TransitionEventImpl implements TransitionEvent {
 		public final long eventId;
 
+		public final long entityId;
+
 		public final long arrivalSerialNumber;
 
 		public final EntityState newState;
 
 		public final EntityState oldState;
+
+		@Override
+		public String toString() {
+			var s = newState != null ? newState : oldState;
+			return String.format(
+					"(%s, %s, %tF %tT, %d)",
+					s.getEventType(), s.getStatus(), s.getDeadline(), s.getDeadline(), newState != null ? newState.getQuantity() : -oldState.getQuantity());
+		}
 	}
 
 	public static class NotSupportedStructureVersion extends Exception {

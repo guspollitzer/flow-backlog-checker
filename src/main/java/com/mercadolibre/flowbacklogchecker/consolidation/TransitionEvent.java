@@ -4,6 +4,8 @@ public interface TransitionEvent {
 
 	long getEventId();
 
+	long getEntityId();
+
 	long getArrivalSerialNumber();
 
 	EntityState getNewState();
