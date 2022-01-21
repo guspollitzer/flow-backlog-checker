@@ -7,9 +7,13 @@ import java.util.Comparator;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.Setter;
+
+import static java.time.temporal.ChronoUnit.HOURS;
 
 /**
  * Contains the known entity types and different versions of their JSON structures.
@@ -77,6 +81,7 @@ public enum EntityType {
 
 	@Setter
 	@NoArgsConstructor
+	@EqualsAndHashCode
 	public static class OutboundUnitStateV0 implements EntityState {
 		public String warehouseId;
 
@@ -87,6 +92,8 @@ public enum EntityType {
 		public String storageId;
 
 		public Timestamp estimatedTimeDeparture;
+
+		public boolean ultimate;
 
 		@Override
 		public String getLogisticCenter() {
@@ -105,13 +112,19 @@ public enum EntityType {
 
 		@Override
 		public String getArea() {
-			final String[] addressFields = storageId != null ? storageId.split("-") : null;
-			return addressFields != null && addressFields.length > 1 ? addressFields[0] : null;
+			return storageId;
+//			final String[] addressFields = storageId != null ? storageId.split("-") : null;
+//			return addressFields != null && addressFields.length > 1 ? addressFields[0] : null;
 		}
 
 		@Override
 		public Timestamp getDeadline() {
 			return estimatedTimeDeparture;
+		}
+
+		@Override
+		public boolean isUltimate() {
+			return "OUT".equals(status);
 		}
 	}
 }

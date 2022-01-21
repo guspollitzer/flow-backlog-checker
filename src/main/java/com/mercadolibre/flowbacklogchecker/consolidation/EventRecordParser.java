@@ -3,6 +3,10 @@ package com.mercadolibre.flowbacklogchecker.consolidation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.Objects;
+import java.util.stream.Collectors;
+
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -16,7 +20,9 @@ public class EventRecordParser {
 		Class<? extends EntityState> structure =
 				EntityType.determineStructure(eventRecord.entityType, eventRecord.structVersion);
 		return new TransitionEventImpl(
-				eventRecord.getEntityId(),
+				eventRecord.eventId,
+				eventRecord.arrivalSerialNumber,
+				eventRecord.entityId,
 				objectMapper.readValue(eventRecord.newStateRawJson, structure),
 				objectMapper.readValue(eventRecord.oldStateRawJson, structure)
 		);
@@ -25,11 +31,26 @@ public class EventRecordParser {
 	@Getter
 	@RequiredArgsConstructor
 	public static class TransitionEventImpl implements TransitionEvent {
+		public final long eventId;
+
+		public final long arrivalSerialNumber;
+
 		public final String entityId;
 
 		public final EntityState newState;
 
 		public final EntityState oldState;
+
+		@Override
+		public String toString() {
+			var fields = Arrays.stream(PartitionsCatalog.PartitionsDb.values())
+					.map(p -> {
+						var oldVal = oldState != null ? p.valueGetter.apply(oldState) : null;
+						var newVal = newState != null ? p.valueGetter.apply(newState) : null;
+						return Objects.equals(newVal, oldVal) ? String.format("%-20s", newVal) : String.format("%s -> %s", oldVal, newVal);
+					}).collect(Collectors.joining(", "));
+			return String.format("%s -> {%s}", entityId, fields);
+		}
 	}
 
 	public static class NotSupportedStructureVersion extends Exception {
