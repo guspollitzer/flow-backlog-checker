@@ -18,13 +18,17 @@ public class PartitionsCatalog {
 		return partitions;
 	}
 
+	public Partition getDeadLinePartition() {
+		return PartitionsDb.deadline;
+	}
+
 	@RequiredArgsConstructor
 	public enum PartitionsDb implements Partition {
 		logisticCenter("logistic_center_id", EntityState::getLogisticCenter),
 		workflow("workflow", EntityState::getWorkflow),
-		area("area", state -> state.getArea() != null ? state.getArea() : "N/A"),
+		deadline("date_out", EntityState::getDeadline),
 		status("status", EntityState::getStatus),
-		deadline("date_out", EntityState::getDeadline);
+		area("area", state -> state.getArea() != null ? state.getArea() : "N/A");
 
 		public  final String columnName;
 

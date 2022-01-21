@@ -30,12 +30,13 @@ public class StoredEventsSource implements EventsSource {
 		long pageStartingSerial;
 		do {
 			pageStartingSerial = lastProvidedSerial;
-			var ps = connection.prepareStatement("SELECT id, entity_id, entity_type, struct_version, new_state, old_state "
+			var ps = connection.prepareStatement("SELECT id, event_id, entity_id, entity_type, struct_version, new_state, old_state "
 					+ "FROM incoming_events "
-					+ "WHERE id > ? "
+					+ "WHERE id > ? AND entity_type = 'outbound-unit'"
 					+ "ORDER BY id ASC "
-					+ "LIMIT 10000", ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY, ResultSet.CLOSE_CURSORS_AT_COMMIT);
+					+ "LIMIT 20000", ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY, ResultSet.CLOSE_CURSORS_AT_COMMIT);
 			ps.setLong(1, lastProvidedSerial);
+			ps.setFetchSize(1000);
 			var rs = ps.executeQuery();
 			while (whileCondition.test() && rs.next()) {
 				var er = EventRecord.fromResultSet(rs);
