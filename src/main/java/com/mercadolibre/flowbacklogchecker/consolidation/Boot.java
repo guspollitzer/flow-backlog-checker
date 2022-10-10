@@ -41,13 +41,12 @@ public class Boot {
 					final long serialNumberOfLastEventOfLastPhoto = backlog.getLastEventArrivalSerialNumber();
 					storedEventsSource.provideWhile(
 							serialNumberOfLastEventOfLastPhoto,
-							() -> true,
 							buildEventIntegrator(backlog, serialNumberOfLastEventOfLastPhoto)
 					);
 
 				} catch (SQLException sqlException) {
 					log.error("Connection lost :", sqlException);
-					Thread.sleep(10000);
+					Thread.sleep(5_000);
 					log.info("Reconnecting...");
 				}
 			}
@@ -61,7 +60,7 @@ public class Boot {
 		return eventRecord -> {
 			try {
 				final TransitionEvent transitionEvent = eventRecordParser.parse(eventRecord);
-				backlog.merge(transitionEvent);
+				backlog.integrate(transitionEvent);
 			} catch (IOException | EventRecordParser.NotSupportedStructureVersion e) {
 				final String message = String.format(
 						"The incoming event with arrival serial number %d was discarded because the conversion form "
@@ -73,6 +72,7 @@ public class Boot {
 				log.error(message, e);
 				// TODO Trigger an alarm.
 			}
+			return true;
 		};
 	}
 

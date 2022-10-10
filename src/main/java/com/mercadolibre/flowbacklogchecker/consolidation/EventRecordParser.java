@@ -3,6 +3,7 @@ package com.mercadolibre.flowbacklogchecker.consolidation;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -22,6 +23,7 @@ public class EventRecordParser {
 		return new TransitionEventImpl(
 				eventRecord.eventId,
 				eventRecord.arrivalSerialNumber,
+				eventRecord.arrivalDate,
 				eventRecord.entityId,
 				objectMapper.readValue(eventRecord.newStateRawJson, structure),
 				objectMapper.readValue(eventRecord.oldStateRawJson, structure)
@@ -35,7 +37,9 @@ public class EventRecordParser {
 
 		public final long arrivalSerialNumber;
 
-		public final String entityId;
+		public final Instant arrivalDate;
+
+		public final long entityId;
 
 		public final EntityState newState;
 
@@ -47,7 +51,7 @@ public class EventRecordParser {
 					.map(p -> {
 						var oldVal = oldState != null ? p.valueGetter.apply(oldState) : null;
 						var newVal = newState != null ? p.valueGetter.apply(newState) : null;
-						return Objects.equals(newVal, oldVal) ? String.format("%-20s", newVal) : String.format("%s -> %s", oldVal, newVal);
+						return Objects.equals(newVal, oldVal) ? String.format("%-46s", newVal) : String.format("%-21s -> %-21s", oldVal, newVal);
 					}).collect(Collectors.joining(", "));
 			return String.format("%s -> {%s}", entityId, fields);
 		}

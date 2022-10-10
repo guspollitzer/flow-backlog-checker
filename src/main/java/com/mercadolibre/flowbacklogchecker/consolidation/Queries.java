@@ -1,7 +1,12 @@
 package com.mercadolibre.flowbacklogchecker.consolidation;
 
+import com.mercadolibre.flowbacklogchecker.consolidation.Backlog.BrokenTrajectoryInfo;
+import com.mercadolibre.flowbacklogchecker.consolidation.Backlog.LastStateSuccess;
+import com.mercadolibre.flowbacklogchecker.consolidation.Backlog.Trajectory;
+import io.netty.util.collection.LongObjectHashMap;
 import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
+import org.springframework.data.util.Pair;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -12,6 +17,7 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 public class Queries {
 
@@ -19,7 +25,7 @@ public class Queries {
 	public final Timestamp now = Timestamp.from(Instant.now());
 
 	public final Map<Backlog.Coordinates, Backlog.CellContent> cells;
-	public final Map<String, List<TransitionEvent>> trajectoriesByEntity;
+	public final LongObjectHashMap<Trajectory> trajectoriesByEntity;
 
 	public Queries(Backlog backlog) {
 		this.backlog = backlog;
@@ -76,46 +82,28 @@ public class Queries {
 				);
 	}
 
-	public Map<Key, IntAccum> trajectoryBasedPopulationGrouped(Predicate<List<TransitionEvent>> trajectoryFilter, int... coordinatesToGroupBy) {
-		return trajectoriesByEntity.values().stream()
-				.filter(trajectoryFilter)
-				.reduce(
-						new TreeMap<Key, IntAccum>(),
-						(acc, trajectory) -> {
-							var state = Backlog.getLastStateOf(trajectory);
-							var key = new Key(Arrays.stream(coordinatesToGroupBy).mapToObj(pi -> PartitionsCatalog.PartitionsDb.values()[pi].valueGetter.apply(state)).toArray());
-							var intAccum = acc.get(key);
-							if (intAccum == null) {
-								intAccum = new IntAccum();
-								acc.put(key, intAccum);
-							}
-							intAccum.register += 1;
-							return acc;
-						},
-						(a, b) -> {
-							a.putAll(b);
-							return a;
-						}
-				);
-	}
-
-	public Map<Key, List<List<TransitionEvent>>> trajectoryBasedGrouping(
-			Predicate<List<TransitionEvent>> trajectoryFilter,
+	public Map<Key, List<Trajectory>> healthyTrajectoryGrouping(
+			Predicate<Trajectory> trajectoryFilter,
+			Trajectory.Comparator entityStateComparator,
 			int... coordinatesToGroupBy
 	) {
 		return trajectoriesByEntity.entrySet().stream()
 				.filter(e -> trajectoryFilter.test(e.getValue()))
 				.reduce(
-						new TreeMap<Key, List<List<TransitionEvent>>>(),
+						new TreeMap<Key, List<Trajectory>>(),
 						(acc, e) -> {
 							final var trajectory = e.getValue();
-							final var lastState = Backlog.getLastStateOf(trajectory);
-							return addTrajectoryToGroup(
-									acc,
-									trajectory,
-									lastState,
-									coordinatesToGroupBy
-							);
+							final var lastState = trajectory.getLastState(entityStateComparator);
+							if (lastState instanceof LastStateSuccess) {
+								return addTrajectoryToGroup(
+										acc,
+										trajectory,
+										((LastStateSuccess) lastState).value,
+										coordinatesToGroupBy
+								);
+							} else {
+								return acc;
+							}
 						},
 						(a, b) -> {
 							a.putAll(b);
@@ -124,27 +112,27 @@ public class Queries {
 				);
 	}
 
-	public Map<Key, List<List<TransitionEvent>>> brokenTrajectories(
-			Predicate<Backlog.UncertainEntityState> stateFilter,
+	public Map<Key, List<Trajectory>> brokenTrajectoriesGrouping(
+			Predicate<BrokenTrajectoryInfo> brokenTrajectoryFilter,
+			Trajectory.Comparator entityStateComparator,
 			boolean groupByNewerOrOlderSide,
 			int... sideCoordinatesToGroupBy
 	) {
 		return trajectoriesByEntity.entrySet().stream()
-				.filter(e -> {
-					var uncertainState = Backlog.getLastStateOf(e.getValue());
-					if (uncertainState instanceof Backlog.UncertainEntityState) {
-						return stateFilter.test((Backlog.UncertainEntityState)uncertainState);
+				.flatMap(e -> {
+					var lastState = e.getValue().getLastState(entityStateComparator);
+					if (lastState instanceof BrokenTrajectoryInfo) {
+						var bti = (BrokenTrajectoryInfo) lastState;
+						return brokenTrajectoryFilter.test(bti) ? Stream.of(bti) : Stream.empty();
 					} else {
-						return false;
+						return Stream.empty();
 					}
 				})
 				.reduce(
-						new TreeMap<Key, List<List<TransitionEvent>>>(),
-						(acc, e) -> {
-							final var trajectory = e.getValue();
-							final var lastState = (Backlog.UncertainEntityState)Backlog.getLastStateOf(trajectory);
-							final var side = groupByNewerOrOlderSide && lastState.getNewerSide() != null ? lastState.getNewerSide() : lastState.getOlderSide();
-							return addTrajectoryToGroup(acc, trajectory, side, sideCoordinatesToGroupBy);
+						new TreeMap<Key, List<Trajectory>>(),
+						(acc, brokenTrajectoryInfo) -> {
+							final var side = groupByNewerOrOlderSide && brokenTrajectoryInfo.newerSide != null ? brokenTrajectoryInfo.newerSide : brokenTrajectoryInfo.olderSide;
+							return addTrajectoryToGroup(acc, brokenTrajectoryInfo.trajectory, side, sideCoordinatesToGroupBy);
 						},
 						(a, b) -> {
 							a.putAll(b);
@@ -153,15 +141,45 @@ public class Queries {
 				);
 	}
 
-	private TreeMap<Key, List<List<TransitionEvent>>> addTrajectoryToGroup(
-			TreeMap<Key, List<List<TransitionEvent>>> groupedTrajectories,
-			List<TransitionEvent> trajectory,
-			EntityState state,
+
+	public Object genericA(Object... params) {
+		return brokenTrajectoriesGrouping(
+				bt -> true,
+				buildStateComparator(4),
+				true,
+				0, 1, 3, 5
+		);
+	}
+
+	public Object genericB(Object... params) {
+		return null;
+	}
+
+	public Object genericC(Object... params) {
+		return null;
+	}
+
+	public Trajectory.Comparator buildStateComparator(int... coordinatesToCompare) {
+		return (a, b) ->
+			a == b
+			|| (
+					(a != null && b != null) && Arrays.stream(coordinatesToCompare)
+					.allMatch(coordinateIndex -> {
+						var valueGetter = PartitionsCatalog.PartitionsDb.values()[coordinateIndex].valueGetter;
+						return valueGetter.apply(a).equals(valueGetter.apply(b));
+					})
+			);
+	}
+
+	private TreeMap<Key, List<Trajectory>> addTrajectoryToGroup(
+			TreeMap<Key, List<Trajectory>> groupedTrajectories,
+			Trajectory trajectory,
+			EntityState discriminatingState,
 			int[] stateCoordinatesToGroupBy
 	) {
 		var key = new Key(
 				Arrays.stream(stateCoordinatesToGroupBy)
-						.mapToObj(pi -> PartitionsCatalog.PartitionsDb.values()[pi].valueGetter.apply(state))
+						.mapToObj(pi -> PartitionsCatalog.PartitionsDb.values()[pi].valueGetter.apply(discriminatingState))
 						.toArray()
 		);
 		var group = groupedTrajectories.computeIfAbsent(key, k -> new ArrayList<>());

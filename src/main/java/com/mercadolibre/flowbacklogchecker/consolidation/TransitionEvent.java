@@ -1,12 +1,16 @@
 package com.mercadolibre.flowbacklogchecker.consolidation;
 
+import java.time.Instant;
+
 public interface TransitionEvent {
 
 	long getEventId();
 
 	long getArrivalSerialNumber();
 
-	String getEntityId();
+	long getEntityId();
+
+	Instant getArrivalDate();
 
 	EntityState getNewState();
 

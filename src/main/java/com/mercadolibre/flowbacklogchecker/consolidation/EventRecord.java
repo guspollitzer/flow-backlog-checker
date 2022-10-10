@@ -2,16 +2,15 @@ package com.mercadolibre.flowbacklogchecker.consolidation;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
-import lombok.ToString;
 
 /**
  * A transition event as received from the fury stream, tagged with a serial number that tells the order of arrival.
  */
 @Getter
 @RequiredArgsConstructor
-@ToString
 public class EventRecord {
 
 	final long eventId;
@@ -22,7 +21,9 @@ public class EventRecord {
 	 */
 	final long arrivalSerialNumber;
 
-	final String entityId;
+	final Instant arrivalDate;
+
+	final long entityId;
 
 	final String entityType;
 
@@ -39,7 +40,8 @@ public class EventRecord {
 		return new EventRecord(
 				rs.getLong("event_id"),
 				rs.getLong("id"),
-				rs.getString("entity_id"),
+				rs.getTimestamp("date_created").toInstant(),
+				rs.getLong("entity_id"),
 				rs.getString("entity_type"),
 				rs.getInt("struct_version"),
 				rs.getString("new_state"),

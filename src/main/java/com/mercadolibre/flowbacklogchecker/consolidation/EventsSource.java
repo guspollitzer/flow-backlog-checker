@@ -1,33 +1,30 @@
 package com.mercadolibre.flowbacklogchecker.consolidation;
 
-/**
- * Specifies the interface of a source of events.
- */
+
+import java.sql.SQLException;
+
 @FunctionalInterface
 public interface EventsSource {
 
 	@FunctionalInterface
 	interface Sink {
-		void accept(EventRecord eventRecord);
-	}
-
-	@FunctionalInterface
-	interface ContextPredicate {
-		boolean test();
+		/**
+		 * The {@link EventsSource} implementation should provide events one by one, synchronously, until this method returns false or the queue
+		 * gets empty.
+		 *
+		 * @return the implementation of the {@link EventsSource#provideWhile(long, Sink)} should continue calling this method while it returns
+		 *     true and the events queue is not empty.
+		 */
+		boolean accept(EventRecord eventRecord);
 	}
 
 	/**
-	 * Push events to the specified {@link Sink} while the specified {@link ContextPredicate} evaluates to true. The
-	 * events are pushed in ascending sequence number order, starting from the specified sequence number exclusive.
+	 * The implementation should push queued events to the specified {@link Sink} until it returns false. The
+	 * events should be pushed synchronously in ascending arrival serial number order, starting from the specified serial number exclusive.
 	 *
-	 * @param startingEventSerialNumberExclusive specifies which event will be the first one to be sent to the sink: the
-	 *        one with the lowest {@link EventRecord#arrivalSerialNumber} that is greater than this parameter.
-	 * @param whileCondition events are provided while this predicate evaluates to `true`.
-	 * @param sink the consumer of the provided events.
+	 * @param startingEventArrivalSerialNumberExclusive specifies which event will be the first one to be sent to the sink: the
+	 *        one with the lowest {@link EventRecord#getArrivalSerialNumber} that is greater than this parameter.
+	 * @param sink the consumer of the provided events and decider of provision continuation.
 	 */
-	void provideWhile(
-			long startingEventSerialNumberExclusive,
-			ContextPredicate whileCondition,
-			Sink sink
-	);
+	void provideWhile(long startingEventArrivalSerialNumberExclusive, Sink sink) throws SQLException;
 }
