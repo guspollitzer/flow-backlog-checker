@@ -26,9 +26,10 @@ public class PartitionsCatalog {
 	public enum PartitionsDb implements Partition {
 		logisticCenter("logistic_center_id", EntityState::getLogisticCenter),
 		workflow("workflow", EntityState::getWorkflow),
-		deadline("date_out", EntityState::getDeadline),
+		area("area", state -> state.getArea() != null ? state.getArea() : "N/A"),
 		status("status", EntityState::getStatus),
-		area("area", state -> state.getArea() != null ? state.getArea() : "N/A");
+		dateIn("date_in", EntityState::getDateIn),
+		deadline("date_out", EntityState::getDeadline);
 
 		public  final String columnName;
 

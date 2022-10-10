@@ -1,5 +1,9 @@
 package com.mercadolibre.flowbacklogchecker.consolidation;
 
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.RequiredArgsConstructor;
 
 import java.sql.Timestamp;
 import java.util.Arrays;
@@ -8,33 +12,30 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import lombok.EqualsAndHashCode;
-import lombok.NoArgsConstructor;
-import lombok.RequiredArgsConstructor;
-import lombok.Setter;
-
 import static java.time.temporal.ChronoUnit.HOURS;
+import static java.time.temporal.ChronoUnit.SECONDS;
 
 /**
  * Contains the known entity types and different versions of their JSON structures.
  */
 public enum EntityType {
-	outboundUnit("outbound-unit", new VersionedStructure(0, OutboundUnitStateV0.class));
+	outboundUnit("outbound-unit",
+			new VersionedStructure(1, OutboundUnitStateV0.class));
 
-	private static final Map<String, EntityType> ENTITY_TYPE_MAP = Arrays.stream(EntityType.values()).collect(
-			Collectors.toUnmodifiableMap(entityType -> entityType.id, Function.identity())
-	);
+	private static final Timestamp BIG_BANG = new Timestamp(0);
 
-	/**
-	 * The identification of entity type as received from the incoming events.
-	 */
+	private static final Map<String, EntityType> ENTITY_TYPE_MAP =
+			Arrays.stream(EntityType.values())
+					.collect(Collectors.toUnmodifiableMap(entityType -> entityType.id, Function.identity()));
+
+	/** The identification of entity type as received from the incoming events. */
 	public final String id;
 
 	/**
-	 * List of the {@link VersionedStructure}s corresponding to this {@link EntityType} instance, in descending order of
-	 * the {@link VersionedStructure#startingVersion} field
+	 * List of the {@link VersionedStructure}s corresponding to this {@link EntityType} instance, in
+	 * descending order of the {@link VersionedStructure#startingVersion} field
 	 */
-	public final VersionedStructure[] versionedStructures;
+	private final VersionedStructure[] versionedStructures;
 
 	EntityType(String id, VersionedStructure... versionedStructures) {
 		this.id = id;
@@ -44,22 +45,21 @@ public enum EntityType {
 	}
 
 	/**
-	 * Finds the {@link VersionedStructure} corresponding to the specified entity type with the greatest {@link
-	 * VersionedStructure#startingVersion} that is less than or equal to the specified version. Assumes that the {@link
-	 * #versionedStructures} elements are in descending order.
+	 * Finds the {@link VersionedStructure} corresponding to the specified entity type with the
+	 * greatest {@link VersionedStructure#startingVersion} that is less than or equal to the specified
+	 * version. Assumes that the {@link #versionedStructures} elements are in descending order.
 	 *
 	 * @param entityTypeName the name of the entity type
 	 * @param version the version of the state structure
 	 * @return the java class that contains the entity state
 	 * @throws EventRecordParser.NotSupportedStructureVersion when the version is illegal
 	 */
-	public static Class<? extends EntityState> determineStructure(String entityTypeName, int version)
-			throws EventRecordParser.NotSupportedStructureVersion {
+	public static Class<? extends EntityState> determineStructure(String entityTypeName, int version) throws EventRecordParser.NotSupportedStructureVersion {
 		EntityType entityType = ENTITY_TYPE_MAP.get(entityTypeName);
 		if (entityType != null) {
 			for (VersionedStructure versionedStructure : entityType.versionedStructures) {
 				if (versionedStructure.startingVersion <= version) {
-					return versionedStructure.structure;
+					return  versionedStructure.backlogStructure;
 				}
 			}
 		}
@@ -67,64 +67,71 @@ public enum EntityType {
 	}
 
 	@RequiredArgsConstructor
-	public static class VersionedStructure {
+	private static class VersionedStructure {
 		/**
-		 * Incoming events whose struct version field is between this number inclusive and the startingVersion of the
+		 * Incoming events whose struct version field is between this number inclusive and the
+		 * startingVersion of the
 		 */
 		final int startingVersion;
 
 		/**
 		 * A java class that matches the JSON structure of the entity state.
 		 */
-		final Class<? extends EntityState> structure;
+		final Class<? extends EntityState> backlogStructure;
+
+
 	}
 
-	@Setter
+	@Getter
 	@NoArgsConstructor
 	@EqualsAndHashCode
 	public static class OutboundUnitStateV0 implements EntityState {
-		public String warehouseId;
+		private static Timestamp lastDateCreated = new Timestamp(0);
 
-		public String groupType;
 
-		public String status;
+		private String logisticCenter;
 
-		public String storageId;
+		private String workflow;
 
-		public Timestamp estimatedTimeDeparture;
+		private String status;
 
-		public boolean ultimate;
+		private Timestamp dateIn;
 
-		@Override
-		public String getLogisticCenter() {
-			return warehouseId;
+		private String area;
+
+		private Timestamp deadline;
+
+		private boolean ultimate;
+
+		public void setWarehouseId(String warehouseId) {this.logisticCenter = warehouseId;}
+
+		public void setGroupType(String groupType) {this.workflow = groupType;}
+
+		public void setStatus(String status) {this.status = status;}
+
+		public void setDateCreated(Timestamp dateCreated) {
+			if (dateCreated != null) {
+				this.dateIn = Timestamp.from(dateCreated.toInstant().truncatedTo(HOURS));
+
+				if (dateCreated.after(lastDateCreated)) {
+					lastDateCreated = dateCreated;
+				}
+			} else if ("PENDING".equals(status)){
+				this.dateIn = Timestamp.from(lastDateCreated.toInstant().truncatedTo(HOURS));;
+			} else {
+				this.dateIn = BIG_BANG;
+			}
 		}
 
-		@Override
-		public String getWorkflow() {
-			return String.format("OUTBOUND-%sS", groupType);
+		public void setStorageId(String storageId) {
+			final String[] addressFields = storageId != null ? storageId.split("-") : null;
+			this.area = addressFields != null && addressFields.length > 1 ? addressFields[0] : null;
 		}
 
-		@Override
-		public String getStatus() {
-			return status;
+		public void setEstimatedTimeDeparture(Timestamp estimatedTimeDeparture) {
+			this.deadline = Timestamp.from(estimatedTimeDeparture.toInstant().truncatedTo(SECONDS));
 		}
 
-		@Override
-		public String getArea() {
-			return storageId;
-//			final String[] addressFields = storageId != null ? storageId.split("-") : null;
-//			return addressFields != null && addressFields.length > 1 ? addressFields[0] : null;
-		}
-
-		@Override
-		public Timestamp getDeadline() {
-			return estimatedTimeDeparture;
-		}
-
-		@Override
-		public boolean isUltimate() {
-			return "OUT".equals(status);
-		}
+		public void setUltimate(boolean ultimate) {this.ultimate = ultimate || "OUT".equals(status);}
 	}
 }

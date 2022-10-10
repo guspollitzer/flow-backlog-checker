@@ -1,45 +1,47 @@
 package com.mercadolibre.flowbacklogchecker.consolidation;
 
+
+import io.netty.util.collection.LongObjectHashMap;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
- * Counts how many entities are in each of the discriminated state subsets, for all entities whose state transition
- * events were merged into this backlog.
+ * Counts how many entities are in each of the discriminated state subsets, for all entities whose
+ * state transition events were integrated into this backlog.
+ *
+ * <p>Note that this is a mutable class that delegates the responsibility of its content
+ * initialization to the user.
+ *
+ * <p>Design note: This class user's code would be much more clear if this class was immutable. The
+ * mutable approach was chosen to improve memory usage and avoid the addition of a dependency to an
+ * immutable collections library.
  */
 @Slf4j
 public class Backlog {
-	private static final int CELLS_HASH_MAP_INITIAL_CAPACITY = 8192;
+	public static final int CELLS_HASH_MAP_INITIAL_CAPACITY = 8192;
 
 	public final PartitionsCatalog partitionsCatalog;
 
-	/**
-	 * The date of the backlog photo this backlog was initialized with.
-	 */
-	public final Instant initialPhotoWasTakenOn;
-
-	/**
-	 * The arrival serial number of the last event that was merged into this backlog.
-	 */
+	/** The arrival serial number of the last event that was merged into this backlog. */
 	public long lastEventArrivalSerialNumber;
+
+	public Instant lastEventArrivalDate;
 
 	public final Map<Coordinates, CellContent> cells;
 
-	public final Map<String, List<TransitionEvent>> trajectoriesByEntity;
+	public final LongObjectHashMap<Trajectory> trajectoriesByEntity;
 
 	/** the amount of entities that where created */
 	public int created = 0;
@@ -49,54 +51,73 @@ public class Backlog {
 	public int discardedEvents = 0;
 
 	public int irregularTrajectories = 0;
-
+	/**
+	 * Creates an under construction {@link Backlog} designed to be completed, by means of the loadCell method, with all the cells of a photo of a previous backlog.
+	 *
+	 * @param partitionsCatalog determines the criteria on how the entities' state space is
+	 *     partitioned.
+	 * @param lastEventArrivalSerialNumber the arrival serial number of the last transition event
+	 *     integrated to this backlog state.
+	 * @param lastEventArrivalDate the arrival date of the last transition event integrated to this
+	 *     backlog state.
+	 */
 	public Backlog(
 			final PartitionsCatalog partitionsCatalog,
 			final long lastEventArrivalSerialNumber,
-			final Instant initialPhotoWasTakenOn
-	) {
+			final Instant lastEventArrivalDate) {
 		this.partitionsCatalog = partitionsCatalog;
 		this.lastEventArrivalSerialNumber = lastEventArrivalSerialNumber;
-		this.initialPhotoWasTakenOn = initialPhotoWasTakenOn;
+		this.lastEventArrivalDate = lastEventArrivalDate;
 
 		this.cells = new HashMap<>(CELLS_HASH_MAP_INITIAL_CAPACITY);
-		this.trajectoriesByEntity = new HashMap<>(65536);
-	}
-
-	public Instant getInitialPhotoWasTakenOn() {
-		return this.initialPhotoWasTakenOn;
+		this.trajectoriesByEntity = new LongObjectHashMap<>(65536);
 	}
 
 	/**
-	 * Gives the arrival serial number of the last merged event.
+	 * @return the arrival date of the last integrated event.
+	 */
+	public Instant getLastEventArrivalDate() {
+		return this.lastEventArrivalDate;
+	}
+
+	/**
+	 * @return an estimate of the number of non-empty cells
+	 */
+	public int getNumberOfCellsTraversed() {
+		return cells.size();
+	}
+
+	/**
+	 * @return the arrival serial number of the last integrated event.
 	 */
 	public long getLastEventArrivalSerialNumber() {
 		return this.lastEventArrivalSerialNumber;
 	}
 
 	/**
-	 * Updates this {@link Backlog} decrementing the population of the cell that contains the old state ({@link
-	 * TransitionEvent#getOldState()}), and incrementing the population of the cell that contains the new state ({@link
-	 * TransitionEvent#getNewState()}).
+	 * Updates this {@link Backlog} decrementing the population of the cell that contains the old
+	 * state ({@link TransitionEvent#getOldState()}), and incrementing the population of the cell that
+	 * contains the new state ({@link TransitionEvent#getNewState()}).
 	 *
-	 * @param transitionEvent the transition event to merge into this instance.
+	 * @param transitionEvent the transition event to integrate into this instance.
 	 */
-	public void merge(final TransitionEvent transitionEvent) {
+	public void integrate(final TransitionEvent transitionEvent) {
 		assert (transitionEvent.getArrivalSerialNumber() > this.lastEventArrivalSerialNumber);
 		this.lastEventArrivalSerialNumber = transitionEvent.getArrivalSerialNumber();
+		this.lastEventArrivalDate = transitionEvent.getArrivalDate();
 
 		var trajectory = trajectoriesByEntity.get(transitionEvent.getEntityId());
 		if (trajectory != null || transitionEvent.getOldState() == null) {
 			if (trajectory == null) {
-				trajectory = new ArrayList<>(16);
+				trajectory = new Trajectory();
 				trajectoriesByEntity.put(transitionEvent.getEntityId(), trajectory);
 			}
-			trajectory.add(transitionEvent);
+			trajectory.events.add(transitionEvent);
 
 			final EntityState oldState = transitionEvent.getOldState();
 			if (oldState != null) {
 				final Coordinates fromIndex = indexOf(oldState);
-				if (this.getCellContent(fromIndex).decrement(transitionEvent)) {
+				if (this.getCellContent(fromIndex).decrement(1)) {
 					this.cells.remove(fromIndex);
 				}
 			} else {
@@ -104,20 +125,19 @@ public class Backlog {
 			}
 
 			final EntityState newState = transitionEvent.getNewState();
-			if (newState != null && !newState.isUltimate()) {
+			if (newState != null) {
 				final Coordinates toIndex = indexOf(newState);
-				this.getCellContent(toIndex).increment(transitionEvent);
-			} else {
-				if (getLastStateOf(trajectory) instanceof UncertainEntityState) {
-					irregularTrajectories += 1;
-					log.warn(
-							"Irregular trajectory #{}: {}",
-							irregularTrajectories,
-							trajectory.stream().map(TransitionEvent::toString).collect(Collectors.joining("\n\t", "[\n\t", "]"))
-					);
-				} else {
-					terminatedSuccessfully += 1;
-					trajectoriesByEntity.remove(transitionEvent.getEntityId());
+				this.getCellContent(toIndex).increment(1);
+
+				if (newState.isUltimate()) {
+					trajectory.isCompleted = true;
+					if (trajectory.getLastState(Object::equals) instanceof BrokenTrajectoryInfo) {
+						irregularTrajectories += 1;
+						log.warn("Irregular trajectory #{}: {}", irregularTrajectories, trajectory);
+					} else {
+						terminatedSuccessfully += 1;
+						trajectoriesByEntity.remove(transitionEvent.getEntityId());
+					}
 				}
 			}
 		} else {
@@ -126,7 +146,24 @@ public class Backlog {
 	}
 
 	/**
-	 * Finds out the {@link Coordinates} of the {@link Cell} corresponding to the specified {@link EntityState}.
+	 * @return all the {@link Cell}s (that conform the discrete space of the entities state) with
+	 *     which this instance was initialized; plus all the {@link Cell}s that, since then, were
+	 *     traversed by an entity whose state transitions have been merged to this instance.
+	 */
+	public Stream<Cell> getCells() {
+		return this.cells.entrySet().stream()
+				.map(
+						e ->
+								new Cell(
+										e.getKey().indexValues,
+										e.getValue().population,
+										e.getValue().variation,
+										e.getValue().accumulatedPopulation));
+	}
+
+	/**
+	 * Finds out the {@link Coordinates} of the {@link Cell} corresponding to the specified {@link
+	 * EntityState}.
 	 */
 	public Coordinates indexOf(EntityState ite) {
 		final var partitionParts = new Object[partitionsCatalog.getPartitions().size()];
@@ -136,9 +173,7 @@ public class Backlog {
 		return new Coordinates(partitionParts);
 	}
 
-	/**
-	 * Gives the {@link CellContent} pointed by the specified {@link Coordinates}
-	 */
+	/** Gives the {@link CellContent} pointed by the specified {@link Coordinates} */
 	public CellContent getCellContent(Coordinates index) {
 		CellContent cell = this.cells.get(index);
 		if (cell == null) {
@@ -149,8 +184,9 @@ public class Backlog {
 	}
 
 	/**
-	 * The cells are the little parts of the entity state space in which the whole entity's state space was divided by the
-	 * known {@link Partition}s. Each cell knows how many entities have their state inside it.
+	 * The cells are the little parts of the entity state space in which the whole entity's state
+	 * space was divided by the known {@link Partition}s. Each cell knows how many entities have their
+	 * state inside it.
 	 */
 	@Getter
 	@RequiredArgsConstructor
@@ -160,58 +196,57 @@ public class Backlog {
 		final int population;
 
 		final int variation;
+
+		final int accumulatedPopulation;
+
 	}
 
-	/**
-	 * A mutable register of the content of a {@link Cell}
-	 */
+	/** A mutable register of the content of a {@link Cell} */
 	@NoArgsConstructor
 	public static class CellContent {
 		public int population;
-		public final Set<String> present = new HashSet<>();
-		public int addedWhenAlreadyPresent = 0;
-		public int removedWhenAbsent = 0;
 
-		public void increment(TransitionEvent transitionEvent) {
-			this.population += 1;
-			var entityId = transitionEvent.getEntityId();
+		public int variation;
 
-			var wasAbsent = this.present.add(entityId);
-			if (!wasAbsent) { addedWhenAlreadyPresent += 1; }
+		public int accumulatedPopulation;
+
+		public CellContent(int population, int accumulatedPopulation) {
+			this.population = population;
+			this.accumulatedPopulation = accumulatedPopulation;
 		}
 
-		public boolean decrement(TransitionEvent transitionEvent) {
-			this.population -= 1;
-			var entityId = transitionEvent.getEntityId();
-			var wasPresent = this.present.remove(entityId);
-			if (!wasPresent) {
-				removedWhenAbsent += 1;
-			}
-			return population == 0 && present.isEmpty();
+		public void increment(int quantity) {
+			this.population += quantity;
+			this.variation += quantity;
+			this.accumulatedPopulation += quantity;
 		}
 
-		public String toString() {
-			return "Cell(population=" + this.population + ", present=" + this.present.size()
-					+ ", addedWhenAlreadyPresent=" + this.addedWhenAlreadyPresent + ", removedWhenAbsent=" + this.removedWhenAbsent + ")";
+		public boolean decrement(int quantity) {
+			this.population -= quantity;
+			this.variation -= quantity;
+			return this.population == 0;
 		}
+
 	}
 
 	/**
-	 * The coordinates of a cell. Instances of this class identify a {@link Cell} of the entity's discrete state space.
+	 * The coordinates of a cell. Instances of this class identify a {@link Cell} of the entity's
+	 * discrete state space.
 	 */
-	static class Coordinates {
+	public static class Coordinates {
 		public final Object[] indexValues;
 
 		public final transient int hash;
 
-		Coordinates(Object... indexValues) {
+		public Coordinates(Object... indexValues) {
 			this.indexValues = indexValues;
 			this.hash = Arrays.hashCode(indexValues);
 		}
 
 		@Override
 		public boolean equals(final Object o) {
-			return o instanceof Coordinates && Arrays.equals(this.indexValues, ((Coordinates) o).indexValues);
+			return o instanceof Coordinates
+					&& Arrays.equals(this.indexValues, ((Coordinates) o).indexValues);
 		}
 
 		@Override
@@ -224,70 +259,64 @@ public class Backlog {
 	}
 
 
-	public static EntityState getLastStateOf(List<TransitionEvent> trajectory) {
-		for (int i = 1; i < trajectory.size(); ++i) {
-			if (!trajectory.get(i).getOldState().equals(trajectory.get(i - 1).getNewState())) {
-				LinkedList<TransitionEvent> looseLinks = new LinkedList<>(trajectory);
-				var first = looseLinks.pollFirst();
-				return getLastStateOf_loop(first.getNewState(), first.getOldState(), looseLinks);
-			}
-		}
-		return trajectory.get(trajectory.size()-1).getNewState();
+	public interface LastState {}
+
+	@RequiredArgsConstructor
+	public static class LastStateSuccess implements  LastState {
+		final EntityState value;
 	}
 
-
-	public static EntityState getLastStateOf_loop(final EntityState newerSide, final EntityState olderSide, LinkedList<TransitionEvent> looseLinks) {
-		if (looseLinks.isEmpty()) {
-			return olderSide;
-		} else {
-			var lastTransition = looseLinks.getLast();
-			for (var link : looseLinks) {
-				if (link.getOldState().equals(newerSide)) {
-					looseLinks.removeFirstOccurrence(link);
-					return getLastStateOf_loop(link.getNewState(), olderSide, looseLinks);
-				} else if (link.getNewState().equals(olderSide)) {
-					looseLinks.removeFirstOccurrence(link);
-					return getLastStateOf_loop(newerSide, link.getOldState(), looseLinks);
-				}
-			}
-			return new UncertainEntityState() {
-				@Override
-				public EntityState getNewerSide() {
-					return newerSide;
-				}
-
-				@Override
-				public EntityState getOlderSide() {
-					return olderSide;
-				}
-
-				@Override
-				public TransitionEvent getLastTransition() {
-					return lastTransition;
-				}
-
-				public boolean isUltimate() {return this.delegate().isUltimate();}
-
-				public Timestamp getDeadline() {return this.delegate().getDeadline();}
-
-				public String getArea() {return this.delegate().getArea();}
-
-				public String getStatus() {return this.delegate().getStatus();}
-
-				public String getWorkflow() {return this.delegate().getWorkflow();}
-
-				public String getLogisticCenter() {return this.delegate().getLogisticCenter();}
-
-				EntityState delegate() {
-					return newerSide != null ? newerSide : olderSide;
-				}
-			};
-		}
+	@RequiredArgsConstructor
+	public static class BrokenTrajectoryInfo implements LastState {
+		final Trajectory trajectory;
+		final EntityState newerSide;
+		final EntityState olderSide;
+		final TransitionEvent lastTransition;
+		final List<TransitionEvent> looseLinks;
 	}
 
-	public interface UncertainEntityState extends EntityState {
-		EntityState getNewerSide();
-		EntityState getOlderSide();
-		TransitionEvent getLastTransition();
+	public static class Trajectory {
+		List<TransitionEvent> events = new ArrayList<>(16);
+		boolean isCompleted = false;
+
+		public interface Comparator {
+			boolean areEqual(EntityState a, EntityState b);
+		}
+
+		public LastState getLastState(Comparator comparator) {
+			for (int i = 1; i < events.size(); ++i) {
+				if (!comparator.areEqual(events.get(i).getOldState(), events.get(i - 1).getNewState())) {
+					LinkedList<TransitionEvent> looseLinks = new LinkedList<>(events);
+					var first = looseLinks.pollFirst();
+					assert first != null;
+					return getLastStateOf_loop(comparator, first.getNewState(), first.getOldState(), looseLinks);
+				}
+			}
+			return new LastStateSuccess(events.get(events.size() - 1).getNewState());
+		}
+
+		public LastState getLastStateOf_loop(final Comparator comparator, final EntityState newerSide, final EntityState olderSide, LinkedList<TransitionEvent> looseLinks) {
+			if (looseLinks.isEmpty()) {
+				return new LastStateSuccess(olderSide);
+			} else {
+				var lastTransition = looseLinks.getLast();
+				for (var link : looseLinks) {
+					if (comparator.areEqual(link.getOldState(), newerSide)) {
+						looseLinks.removeFirstOccurrence(link);
+						return getLastStateOf_loop(comparator, link.getNewState(), olderSide, looseLinks);
+					} else if (comparator.areEqual(link.getNewState(), olderSide)) {
+						looseLinks.removeFirstOccurrence(link);
+						return getLastStateOf_loop(comparator, newerSide, link.getOldState(), looseLinks);
+					}
+				}
+				return new BrokenTrajectoryInfo(this, newerSide, olderSide, lastTransition, looseLinks);
+			}
+		}
+
+		@Override
+		public String toString() {
+			var x = events.stream().map(TransitionEvent::toString).collect(Collectors.joining("\n\t", "[\n\t", "]"));
+			return String.format("{isComplete:%b, events:%s", isCompleted, x);
+		}
 	}
 }
