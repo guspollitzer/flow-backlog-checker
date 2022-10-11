@@ -107,7 +107,14 @@ public enum EntityType {
 
 		public void setGroupType(String groupType) {this.workflow = groupType;}
 
-		public void setStatus(String status) {this.status = status;}
+		public void setStatus(String status) {
+			this.status = status;
+			if ("OUT".equals(status)) {
+				this.ultimate = true;
+			} else if ("PENDING".equals(status) && this.dateIn == BIG_BANG) {
+				this.dateIn = Timestamp.from(lastDateCreated.toInstant().truncatedTo(HOURS));
+			}
+		}
 
 		public void setDateCreated(Timestamp dateCreated) {
 			if (dateCreated != null) {
