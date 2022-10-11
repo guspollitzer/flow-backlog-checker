@@ -115,7 +115,7 @@ public class Queries {
 	public Map<Key, List<Trajectory>> brokenTrajectoriesGrouping(
 			Predicate<BrokenTrajectoryInfo> brokenTrajectoryFilter,
 			Trajectory.Comparator entityStateComparator,
-			boolean groupByNewerOrOlderSide,
+			boolean groupByLastGoodOrFirstBadLink,
 			int... sideCoordinatesToGroupBy
 	) {
 		return trajectoriesByEntity.entrySet().stream()
@@ -131,7 +131,7 @@ public class Queries {
 				.reduce(
 						new TreeMap<Key, List<Trajectory>>(),
 						(acc, brokenTrajectoryInfo) -> {
-							final var side = groupByNewerOrOlderSide && brokenTrajectoryInfo.newerSide != null ? brokenTrajectoryInfo.newerSide : brokenTrajectoryInfo.olderSide;
+							final var side = groupByLastGoodOrFirstBadLink ? brokenTrajectoryInfo.newerSide : brokenTrajectoryInfo.looseLinks.get(0).getOldState();
 							return addTrajectoryToGroup(acc, brokenTrajectoryInfo.trajectory, side, sideCoordinatesToGroupBy);
 						},
 						(a, b) -> {
@@ -169,6 +169,11 @@ public class Queries {
 						return valueGetter.apply(a).equals(valueGetter.apply(b));
 					})
 			);
+	}
+
+	public Predicate<BrokenTrajectoryInfo> buildSlaFilter(Instant sla) {
+		final var time = sla.toEpochMilli();
+		return bti -> bti.trajectory.events.stream().anyMatch(e -> e.getNewState().getDeadline().getTime() == time);
 	}
 
 	private TreeMap<Key, List<Trajectory>> addTrajectoryToGroup(
